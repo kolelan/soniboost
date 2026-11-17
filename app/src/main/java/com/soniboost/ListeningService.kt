@@ -19,6 +19,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.soniboost.audio.EqLibrary
 import com.soniboost.audio.HeadphoneRoute
 import com.soniboost.audio.MicrophoneChoice
 import com.soniboost.audio.MicrophoneChoiceStore
@@ -37,6 +38,7 @@ class ListeningService : Service() {
     private lateinit var pipeline: SpeechPipeline
     private lateinit var audioManager: AudioManager
     private lateinit var microphoneStore: MicrophoneChoiceStore
+    private lateinit var eqLibrary: EqLibrary
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioJobs = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "soniboost-route")
@@ -55,6 +57,7 @@ class ListeningService : Service() {
         pipeline = SpeechPipeline(this)
         audioManager = getSystemService(AudioManager::class.java)
         microphoneStore = MicrophoneChoiceStore(this)
+        eqLibrary = EqLibrary(this)
         ensureChannel()
     }
 
@@ -62,6 +65,7 @@ class ListeningService : Service() {
         when (intent?.action) {
             ACTION_STOP -> stopProcessing()
             ACTION_SET_MIC -> switchMicrophone(intent)
+            ACTION_APPLY_EQ -> applyStoredEq()
             else -> startProcessing()
         }
         return START_NOT_STICKY
@@ -93,8 +97,15 @@ class ListeningService : Service() {
         engaged = true
         audioJobs.execute {
             pipeline.onStopped = { mainHandler.post { stopProcessing() } }
+            pipeline.updateCurve(eqLibrary.active())
             val result = pipeline.start(microphoneStore.get())
             mainHandler.post { if (!stopping) applyResult(result) }
+        }
+    }
+
+    private fun applyStoredEq() {
+        audioJobs.execute {
+            pipeline.updateCurve(eqLibrary.active())
         }
     }
 
@@ -294,6 +305,7 @@ class ListeningService : Service() {
         private const val UNPLUG_CONFIRM_MS = 1_500L
         private const val ACTION_STOP = "com.soniboost.action.STOP"
         private const val ACTION_SET_MIC = "com.soniboost.action.SET_MIC"
+        private const val ACTION_APPLY_EQ = "com.soniboost.action.APPLY_EQ"
         private const val EXTRA_MIC = "microphone"
 
         @Volatile
@@ -320,6 +332,12 @@ class ListeningService : Service() {
 
         fun stop(context: Context) {
             val intent = Intent(context, ListeningService::class.java).setAction(ACTION_STOP)
+            context.startService(intent)
+        }
+
+        fun applyEq(context: Context) {
+            if (!engaged) return
+            val intent = Intent(context, ListeningService::class.java).setAction(ACTION_APPLY_EQ)
             context.startService(intent)
         }
 

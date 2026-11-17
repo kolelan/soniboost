@@ -85,6 +85,9 @@ class MainActivity : AppCompatActivity() {
             showMain()
         }
         toggleButton.setOnClickListener { onToggle() }
+        findViewById<Button>(R.id.eqButton).setOnClickListener {
+            startActivity(Intent(this, EqActivity::class.java))
+        }
         phoneMicButton.setOnClickListener { selectMic(MicrophoneChoice.Phone) }
         headsetMicButton.setOnClickListener { selectMic(MicrophoneChoice.Headset) }
         if (disclaimer.isAccepted()) showMain() else showDisclaimer()

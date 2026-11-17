@@ -120,6 +120,15 @@
                 android:textSize="16sp" />
 
             <Button
+                android:id="@+id/eqButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:minHeight="48dp"
+                android:text="@string/action_eq"
+                android:textSize="18sp" />
+
+            <Button
                 android:id="@+id/toggleButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

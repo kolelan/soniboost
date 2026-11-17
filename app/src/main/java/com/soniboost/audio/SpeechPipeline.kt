@@ -51,6 +51,10 @@ class SpeechPipeline(context: Context) {
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var effect: DynamicsProcessing? = null
+    private var sampleRateHz = 0
+    private var graphicGains = EqCurves.mild().graphic
+    private var toneBands = EqCurves.mild().tones
+    private val toneFilters = Array(EqCurve.TONE_COUNT) { Biquad() }
     private var focusRequest: AudioFocusRequest? = null
 
     var microphone: MicrophoneChoice = MicrophoneChoice.Phone
@@ -224,6 +228,7 @@ class SpeechPipeline(context: Context) {
             if (!capturing) break
             if (read < 0) break
             if (read == 0) continue
+            shape(buffer, read)
             val written = player.write(buffer, 0, read, AudioTrack.WRITE_BLOCKING)
             if (written < 0) break
         }
@@ -261,6 +266,8 @@ class SpeechPipeline(context: Context) {
         val player = track ?: error("AudioTrack не создан")
         prepared.playbackDevice?.let { player.setPreferredDevice(it) }
         outputBufferMs = player.bufferSizeInFrames * 1_000 / sampleRate
+        sampleRateHz = sampleRate
+        pushTones()
         effect = speechEffect(player.audioSessionId)
         record = openMicrophone(prepared, sampleRate, encoding, channelIn, recordBytes)
         if (!requestFocus(attributes)) throw FocusDeniedException()
@@ -313,7 +320,7 @@ class SpeechPipeline(context: Context) {
             DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
             1,
             true,
-            SPEECH_BANDS,
+            EqCurve.BAND_COUNT,
             false,
             0,
             false,
@@ -321,7 +328,7 @@ class SpeechPipeline(context: Context) {
             true,
         ).build()
         val processing = DynamicsProcessing(0, sessionId, config)
-        processing.setPreEqAllChannelsTo(speechEq())
+        processing.setPreEqAllChannelsTo(graphicEq())
         processing.setLimiterAllChannelsTo(
             DynamicsProcessing.Limiter(
                 true,
@@ -338,11 +345,37 @@ class SpeechPipeline(context: Context) {
         return processing
     }
 
-    private fun speechEq(): DynamicsProcessing.Eq {
-        val eq = DynamicsProcessing.Eq(true, true, SPEECH_BANDS)
-        eq.setBand(2, DynamicsProcessing.EqBand(true, 16_000f, 0f))
-        eq.setBand(1, DynamicsProcessing.EqBand(true, 4_000f, SPEECH_BOOST_DB))
-        eq.setBand(0, DynamicsProcessing.EqBand(true, 1_000f, 0f))
+    fun updateCurve(curve: EqCurve) {
+        graphicGains = curve.graphic
+        toneBands = curve.tones
+        effect?.let { it.setPreEqAllChannelsTo(graphicEq()) }
+        if (sampleRateHz > 0) pushTones()
+    }
+
+    private fun shape(buffer: ShortArray, count: Int) {
+        for (index in 0 until count) {
+            var sample = buffer[index].toFloat()
+            sample = toneFilters[0].process(sample)
+            sample = toneFilters[1].process(sample)
+            sample = toneFilters[2].process(sample)
+            buffer[index] = sample.coerceIn(-32768f, 32767f).toInt().toShort()
+        }
+    }
+
+    private fun pushTones() {
+        toneBands.forEachIndexed { index, band ->
+            toneFilters[index].coeffs = band.coefficients(sampleRateHz)
+        }
+    }
+
+    private fun graphicEq(): DynamicsProcessing.Eq {
+        val eq = DynamicsProcessing.Eq(true, true, EqCurve.BAND_COUNT)
+        for (index in EqCurve.BAND_COUNT - 1 downTo 0) {
+            eq.setBand(
+                index,
+                DynamicsProcessing.EqBand(true, EqCurve.CUTOFFS[index], graphicGains[index].toFloat()),
+            )
+        }
         return eq
     }
 
@@ -407,8 +440,6 @@ class SpeechPipeline(context: Context) {
     private companion object {
         const val CAPTURE_FRAMES = 256
         const val BYTES_PER_FRAME = 2
-        const val SPEECH_BANDS = 3
-        const val SPEECH_BOOST_DB = 3f
         const val LIMITER_ATTACK_MS = 5f
         const val LIMITER_RELEASE_MS = 60f
         const val LIMITER_RATIO = 20f
