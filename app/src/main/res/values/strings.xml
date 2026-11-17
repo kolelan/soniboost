@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Soniboost</string>
+    <string name="disclaimer_title">Это не медицинское приложение</string>
+    <string name="disclaimer_body">Soniboost — прототип для более разборчивого прослушивания речи в наушниках. Это не медицинское изделие и не медицинская услуга. Медицинская экспертиза не проводилась. Приложение не диагностирует и не лечит потерю слуха и не заменяет слуховой аппарат или врача.</string>
+    <string name="disclaimer_accept">Понимаю и продолжаю</string>
+    <string name="permanent_disclaimer">Не медицинское изделие и не медицинская услуга. Медэкспертиза не проводилась. Не заменяет слуховой аппарат или врача. Ограничитель громкости не гарантирует безопасный уровень на любых наушниках.</string>
+    <string name="action_start">Старт</string>
+    <string name="action_stop">Стоп</string>
+    <string name="status_ready">Можно слушать речь рядом</string>
+    <string name="status_running">Идёт обработка. Экран можно выключить.</string>
+    <string name="notification_channel">Обработка речи</string>
+    <string name="notification_listening">Идёт обработка. Экран можно выключить.</string>
+    <string name="notification_mic_phone">Микрофон телефона.</string>
+    <string name="notification_mic_headset">Микрофон наушников.</string>
+    <string name="notification_stop">Стоп</string>
+    <string name="mic_label">Микрофон</string>
+    <string name="mic_phone">Телефон</string>
+    <string name="mic_headset">Наушники</string>
+    <string name="mic_hint_phone">Слышно вокруг телефона.</string>
+    <string name="mic_hint_headset">Слышно у наушников. По Bluetooth звук идёт как при звонке: уже и с большей задержкой.</string>
+    <string name="mic_hint_connecting">Переключаю микрофон.</string>
+    <string name="status_headset_mic_unavailable">Микрофон наушников не подключился.</string>
+    <string name="status_bluetooth_denied">Без доступа к Bluetooth микрофон наушников не включить.</string>
+    <string name="status_need_headphones">Подключите наушники. В динамик телефона звук не выводится: иначе микрофон ловит сам себя.</string>
+    <string name="status_mic_denied">Без доступа к микрофону обработать речь нельзя.</string>
+    <string name="status_focus_denied">Система не отдала звуковой фокус. Закройте другое приложение, которое занимает звук, и попробуйте снова.</string>
+    <string name="status_start_failed">Не удалось запустить обработку. %1$s</string>
+    <string name="route_wired">Наушники проводные.</string>
+    <string name="route_wireless">Наушники беспроводные. Задержка может быть заметной — для разговора рядом лучше проводные.</string>
+    <string name="route_none">Наушники не найдены.</string>
+    <string name="latency_buffer">Буфер вывода: %1$d мс. Полный путь от микрофона до уха длиннее, особенно с беспроводными наушниками.</string>
+</resources>
