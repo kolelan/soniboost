@@ -130,6 +130,8 @@ class ListeningService : Service() {
             pipeline.applyGate(profile.gate)
             pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
             pipeline.applyAdaptive(profile.adaptive, powerProfile.allowsAdaptiveBoost(), powerProfile.adaptivePace())
+            pipeline.applyClarity(profile.clarity)
+            pipeline.applyLimiter(profile.limiterDb)
             val result = pipeline.start(microphoneStore.get())
             mainHandler.post { if (!stopping) applyResult(result) }
         }
@@ -142,6 +144,8 @@ class ListeningService : Service() {
             pipeline.applyGate(profile.gate)
             pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
             pipeline.applyAdaptive(profile.adaptive, powerProfile.allowsAdaptiveBoost(), powerProfile.adaptivePace())
+            pipeline.applyClarity(profile.clarity)
+            pipeline.applyLimiter(profile.limiterDb)
         }
     }
 

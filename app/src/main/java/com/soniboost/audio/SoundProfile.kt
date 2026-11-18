@@ -9,6 +9,8 @@ data class SoundProfile(
     val builtin: Boolean,
     val description: String = "",
     val gate: NoiseGateSettings = NoiseGateSettings(),
+    val clarity: ClaritySettings = ClaritySettings(),
+    val limiterDb: Int = OutputLevel.DEFAULT_DB,
 )
 
 object SoundProfiles {
@@ -26,20 +28,20 @@ object SoundProfiles {
     const val FL_STRONG = "fl_strong"
 
     fun builtins(): List<SoundProfile> = listOf(
-        profile(EqCurves.SPEECH, EqCurves.mild(), LoweringSettings(), gate = speechGate()),
-        profile(EqCurves.STRONG, EqCurves.strong(), LoweringSettings(), gate = strongGate()),
-        profile(CLARITY, clarityCurve(), LoweringSettings(), gate = speechGate()),
-        profile(ADAPTIVE, EqCurves.mild(), LoweringSettings(), adaptive = AdaptiveSettings.moderate(), gate = adaptiveGate()),
-        profile(EVERYDAY, bands(0, 0, -1, -1, 1, 3, 3, 1, 0, 0), LoweringSettings(), gate = everydayGate()),
-        profile(NOISE, bands(0, -1, -4, -4, 1, 3, 6, 2, 0, 0), LoweringSettings(), peak(3_000, 3), gate = noiseGate()),
-        profile(QUIET, bands(0, 0, 0, 0, 0, 2, 3, 1, 0, 0), LoweringSettings(), peak(3_000, 2, 1f), gate = quietGate()),
+        profile(EqCurves.SPEECH, EqCurves.mild(), LoweringSettings(), gate = speechGate(), clarity = clarity(4, -36), limiterDb = -8),
+        profile(EqCurves.STRONG, EqCurves.strong(), LoweringSettings(), gate = strongGate(), clarity = clarity(3, -34), limiterDb = -10),
+        profile(CLARITY, clarityCurve(), LoweringSettings(), gate = speechGate(), clarity = clarity(6, -36), limiterDb = -9),
+        profile(ADAPTIVE, EqCurves.mild(), LoweringSettings(), adaptive = AdaptiveSettings.moderate(), gate = adaptiveGate(), clarity = clarity(3, -38), limiterDb = -8),
+        profile(EVERYDAY, bands(0, 0, -1, -1, 1, 3, 3, 1, 0, 0), LoweringSettings(), gate = everydayGate(), clarity = clarity(4, -36), limiterDb = -8),
+        profile(NOISE, bands(0, -1, -4, -4, 1, 3, 6, 2, 0, 0), LoweringSettings(), peak(3_000, 3), gate = noiseGate(), clarity = clarity(6, -30), limiterDb = -10),
+        profile(QUIET, bands(0, 0, 0, 0, 0, 2, 3, 1, 0, 0), LoweringSettings(), peak(3_000, 2, 1f), gate = quietGate(), clarity = clarity(5, -42), limiterDb = -6),
         profile(MUSIC, bands(1, 1, 1, 0, 0, 0, 0, 1, 1, 0), LoweringSettings()),
-        profile(TV, bands(0, 0, -1, -3, 2, 4, 5, 3, 0, 0), LoweringSettings(), peak(4_000, 2), gate = tvGate()),
-        profile(PHONE, bands(-2, -2, 0, 1, 3, 5, 3, -3, -6, -6), LoweringSettings(), peak(2_000, 3, 1f), gate = phoneGate()),
-        profile(OUTDOOR, bands(-2, -4, -5, -3, 1, 3, 4, 2, 0, 0), LoweringSettings(), gate = outdoorGate()),
-        profile(CAR, bands(-3, -6, -6, -4, 1, 4, 5, 2, 0, 0), LoweringSettings(), gate = carGate()),
-        profile(FL_MODERATE, EqCurves.mild(), LoweringSettings.moderate(), gate = speechGate()),
-        profile(FL_STRONG, EqCurves.strong(), LoweringSettings.strong(), gate = strongGate()),
+        profile(TV, bands(0, 0, -1, -3, 2, 4, 5, 3, 0, 0), LoweringSettings(), peak(4_000, 2), gate = tvGate(), clarity = clarity(5, -40), limiterDb = -8),
+        profile(PHONE, bands(-2, -2, 0, 1, 3, 5, 3, -3, -6, -6), LoweringSettings(), peak(2_000, 3, 1f), gate = phoneGate(), clarity = clarity(4, -32), limiterDb = -10),
+        profile(OUTDOOR, bands(-2, -4, -5, -3, 1, 3, 4, 2, 0, 0), LoweringSettings(), gate = outdoorGate(), clarity = clarity(5, -32), limiterDb = -8),
+        profile(CAR, bands(-3, -6, -6, -4, 1, 4, 5, 2, 0, 0), LoweringSettings(), gate = carGate(), clarity = clarity(4, -34), limiterDb = -10),
+        profile(FL_MODERATE, EqCurves.mild(), LoweringSettings.moderate(), gate = speechGate(), clarity = clarity(4, -36), limiterDb = -8),
+        profile(FL_STRONG, EqCurves.strong(), LoweringSettings.strong(), gate = strongGate(), clarity = clarity(3, -34), limiterDb = -10),
         profile(EqCurves.FLAT, EqCurves.flat(), LoweringSettings()),
     )
 
@@ -52,8 +54,17 @@ object SoundProfiles {
         tones: List<ToneBand> = curve.tones,
         adaptive: AdaptiveSettings = AdaptiveSettings(),
         gate: NoiseGateSettings = NoiseGateSettings(),
+        clarity: ClaritySettings = ClaritySettings(),
+        limiterDb: Int = OutputLevel.DEFAULT_DB,
     ): SoundProfile {
-        return SoundProfile(id, "", curve.copy(tones = tones), lowering, adaptive, builtin = true, gate = gate)
+        return SoundProfile(
+            id, "", curve.copy(tones = tones), lowering, adaptive,
+            builtin = true, gate = gate, clarity = clarity, limiterDb = limiterDb,
+        )
+    }
+
+    private fun clarity(strength: Int, threshold: Int): ClaritySettings {
+        return ClaritySettings(enabled = true, strength = strength, thresholdDb = threshold)
     }
 
     private fun gate(

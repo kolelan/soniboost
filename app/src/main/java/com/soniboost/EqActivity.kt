@@ -20,6 +20,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.ImageViewCompat
 import com.soniboost.audio.AdaptiveSettings
+import com.soniboost.audio.ClaritySettings
+import com.soniboost.audio.OutputLevel
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.LoweringMethod
@@ -86,6 +88,13 @@ class EqActivity : AppCompatActivity() {
     private lateinit var gateHoldValue: TextView
     private lateinit var gateReleaseSeek: SeekBar
     private lateinit var gateReleaseValue: TextView
+    private lateinit var claritySwitch: SwitchCompat
+    private lateinit var clarityStrengthSeek: SeekBar
+    private lateinit var clarityStrengthValue: TextView
+    private lateinit var clarityThresholdSeek: SeekBar
+    private lateinit var clarityThresholdValue: TextView
+    private lateinit var limiterSeek: SeekBar
+    private lateinit var limiterValue: TextView
     private var loweringMethod = LoweringMethod.Compression
     private var ratio = 2f
     private var shiftHz = 1_000
@@ -99,6 +108,7 @@ class EqActivity : AppCompatActivity() {
         profileDescription = findViewById(R.id.profileDescription)
         deleteButton = findViewById(R.id.deleteTemplateButton)
         bindGate()
+        bindOutput()
         bindLowering()
         bindAdaptive()
         buildToneRows(findViewById(R.id.toneBands))
@@ -166,6 +176,8 @@ class EqActivity : AppCompatActivity() {
         showGate(profile.gate)
         showLowering(profile.lowering)
         showAdaptive(profile.adaptive)
+        showClarity(profile.clarity)
+        showLimiter(profile.limiterDb)
         showPurpose(profile)
         loading = false
         refreshPowerNote()
@@ -193,6 +205,8 @@ class EqActivity : AppCompatActivity() {
             lowering = currentLowering(),
             adaptive = currentAdaptive(),
             gate = currentGate(),
+            clarity = currentClarity(),
+            limiterDb = currentLimiter(),
             builtin = false,
         )
     }
@@ -597,6 +611,65 @@ class EqActivity : AppCompatActivity() {
 
     private fun showMix() {
         mixValue.text = getString(R.string.lowering_mix_value, mixSeek.progress)
+    }
+
+    private fun bindOutput() {
+        claritySwitch = findViewById(R.id.claritySwitch)
+        clarityStrengthSeek = findViewById(R.id.clarityStrengthSeek)
+        clarityStrengthValue = findViewById(R.id.clarityStrengthValue)
+        clarityThresholdSeek = findViewById(R.id.clarityThresholdSeek)
+        clarityThresholdValue = findViewById(R.id.clarityThresholdValue)
+        limiterSeek = findViewById(R.id.limiterSeek)
+        limiterValue = findViewById(R.id.limiterValue)
+        clarityStrengthSeek.setOnSeekBarChangeListener(loweringListener { showClarityStrength(); publish() })
+        clarityThresholdSeek.setOnSeekBarChangeListener(loweringListener { showClarityThreshold(); publish() })
+        limiterSeek.setOnSeekBarChangeListener(loweringListener { showLimiterValue(); publish() })
+        claritySwitch.setOnCheckedChangeListener { _, checked ->
+            if (loading) return@setOnCheckedChangeListener
+            if (checked && clarityStrengthSeek.progress == 0) {
+                clarityStrengthSeek.progress = ClaritySettings.DEFAULT_STRENGTH
+                showClarityStrength()
+            }
+            publish()
+        }
+    }
+
+    private fun showClarity(settings: ClaritySettings) {
+        claritySwitch.isChecked = settings.enabled
+        clarityStrengthSeek.progress = settings.strength.coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH)
+        clarityThresholdSeek.progress = (settings.thresholdDb - ClaritySettings.MIN_THRESHOLD)
+            .coerceIn(0, ClaritySettings.MAX_THRESHOLD - ClaritySettings.MIN_THRESHOLD)
+        showClarityStrength()
+        showClarityThreshold()
+    }
+
+    private fun currentClarity(): ClaritySettings {
+        return ClaritySettings(
+            enabled = claritySwitch.isChecked,
+            strength = clarityStrengthSeek.progress,
+            thresholdDb = ClaritySettings.MIN_THRESHOLD + clarityThresholdSeek.progress,
+        )
+    }
+
+    private fun showClarityStrength() {
+        clarityStrengthValue.text = getString(R.string.gate_db, clarityStrengthSeek.progress)
+    }
+
+    private fun showClarityThreshold() {
+        val db = ClaritySettings.MIN_THRESHOLD + clarityThresholdSeek.progress
+        clarityThresholdValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showLimiter(thresholdDb: Int) {
+        limiterSeek.progress = (thresholdDb - OutputLevel.MIN_DB)
+            .coerceIn(0, OutputLevel.MAX_DB - OutputLevel.MIN_DB)
+        showLimiterValue()
+    }
+
+    private fun currentLimiter(): Int = OutputLevel.MIN_DB + limiterSeek.progress
+
+    private fun showLimiterValue() {
+        limiterValue.text = getString(R.string.gate_db, currentLimiter())
     }
 
     private fun bindGate() {

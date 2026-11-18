@@ -62,6 +62,8 @@ class SoundProfileLibrary(context: Context) {
                 lowering = profile.lowering,
                 adaptive = profile.adaptive,
                 gate = profile.gate,
+                clarity = profile.clarity,
+                limiterDb = profile.limiterDb,
                 description = profile.description,
             )
         } else {
@@ -137,6 +139,8 @@ class SoundProfileLibrary(context: Context) {
             .put("lowering", encodeLowering(profile.lowering))
             .put("adaptive", encodeAdaptive(profile.adaptive))
             .put("gate", encodeGate(profile.gate))
+            .put("clarity", encodeClarity(profile.clarity))
+            .put("limiter", profile.limiterDb)
             .toString()
     }
 
@@ -153,6 +157,9 @@ class SoundProfileLibrary(context: Context) {
                 lowering = decodeLowering(json.optJSONObject("lowering")),
                 adaptive = decodeAdaptive(json),
                 gate = decodeGate(json.optJSONObject("gate")),
+                clarity = decodeClarity(json.optJSONObject("clarity")),
+                limiterDb = json.optInt("limiter", OutputLevel.DEFAULT_DB)
+                    .coerceIn(OutputLevel.MIN_DB, OutputLevel.MAX_DB),
                 builtin = SoundProfiles.byId(id) != null,
             )
         } catch (_: Exception) {
@@ -198,6 +205,24 @@ class SoundProfileLibrary(context: Context) {
             }
         }
         return EqCurve(graphic, tones)
+    }
+
+    private fun encodeClarity(settings: ClaritySettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("strength", settings.strength)
+            .put("threshold", settings.thresholdDb)
+    }
+
+    private fun decodeClarity(json: JSONObject?): ClaritySettings {
+        if (json == null) return ClaritySettings()
+        return ClaritySettings(
+            enabled = json.optBoolean("enabled", false),
+            strength = json.optInt("strength", ClaritySettings.DEFAULT_STRENGTH)
+                .coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH),
+            thresholdDb = json.optInt("threshold", ClaritySettings.DEFAULT_THRESHOLD)
+                .coerceIn(ClaritySettings.MIN_THRESHOLD, ClaritySettings.MAX_THRESHOLD),
+        )
     }
 
     private fun encodeGate(settings: NoiseGateSettings): JSONObject {
