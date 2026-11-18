@@ -6,14 +6,18 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.ImageViewCompat
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.EqLibrary
@@ -35,8 +39,7 @@ class EqActivity : AppCompatActivity() {
     private val graphicSeeks = mutableListOf<SeekBar>()
     private val graphicValues = mutableListOf<TextView>()
     private val toneShapes = MutableList(EqCurve.TONE_COUNT) { ToneShape.Peak }
-    private val toneShapeButtons = mutableListOf<List<Button>>()
-    private val toneShapeHints = mutableListOf<TextView>()
+    private val toneShapeButtons = mutableListOf<List<ImageButton>>()
     private val frequencySeeks = mutableListOf<SeekBar>()
     private val frequencyValues = mutableListOf<TextView>()
     private val qualitySeeks = mutableListOf<SeekBar>()
@@ -96,7 +99,7 @@ class EqActivity : AppCompatActivity() {
             graphicValues[index].text = dbText(gain)
         }
         curve.tones.forEachIndexed { index, band ->
-            toneShapes[index] = band.shape
+            toneShapes[index] = shapeForGain(band.shape, band.gainDb)
             markShape(index)
             frequencySeeks[index].progress = hzToProgress(band.frequencyHz)
             frequencyValues[index].text = getString(R.string.eq_hz, band.frequencyHz)
@@ -181,17 +184,22 @@ class EqActivity : AppCompatActivity() {
             }
             parent.addView(title)
             val buttons = ToneShape.entries.map { shape ->
-                Button(this).apply {
-                    text = shapeLabel(shape)
-                    minHeight = dp(48)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                ImageButton(this).apply {
+                    setImageResource(shapeIcon(shape))
+                    contentDescription = shapeDescription(shape)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    background = ContextCompat.getDrawable(this@EqActivity, R.drawable.shape_choice_bg)
+                    backgroundTintList = null
+                    ImageViewCompat.setImageTintList(
+                        this,
+                        ContextCompat.getColorStateList(this@EqActivity, R.color.mic_button_text),
+                    )
+                    minimumHeight = dp(48)
+                    setPadding(dp(8), dp(10), dp(8), dp(10))
+                    layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                         marginEnd = dp(4)
                     }
-                    setOnClickListener {
-                        toneShapes[index] = shape
-                        markShape(index)
-                        publish()
-                    }
+                    setOnClickListener { applyShape(index, shape) }
                 }
             }
             toneShapeButtons += buttons
@@ -199,13 +207,6 @@ class EqActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 buttons.forEach { addView(it) }
             })
-            val hint = TextView(this).apply {
-                setTextColor(getColor(R.color.on_background_muted))
-                textSize = 16f
-                setPadding(0, dp(4), 0, 0)
-            }
-            toneShapeHints += hint
-            parent.addView(hint)
             val frequencyValue = valueText()
             val frequency = SeekBar(this).apply {
                 max = FREQUENCY_STEPS
@@ -230,7 +231,10 @@ class EqActivity : AppCompatActivity() {
             parent.addView(row(labelView(getString(R.string.eq_quality)), quality, qualityValue))
             val gainValue = valueText()
             val gain = dbSeek {
-                gainValue.text = dbText(progress + EqCurve.MIN_DB)
+                val db = progress + EqCurve.MIN_DB
+                gainValue.text = dbText(db)
+                toneShapes[index] = shapeForGain(toneShapes[index], db)
+                markShape(index)
                 publish()
             }
             toneGainSeeks += gain
@@ -239,11 +243,37 @@ class EqActivity : AppCompatActivity() {
         }
     }
 
+    private fun applyShape(index: Int, shape: ToneShape) {
+        val gain = toneGainSeeks[index].progress + EqCurve.MIN_DB
+        val nextGain = when (shape) {
+            ToneShape.Peak -> kotlin.math.abs(gain)
+            ToneShape.PeakCut -> -kotlin.math.abs(gain)
+            else -> gain
+        }
+        toneShapes[index] = shape
+        if (nextGain != gain) {
+            toneGainSeeks[index].progress = nextGain - EqCurve.MIN_DB
+            toneGainValues[index].text = dbText(nextGain)
+        }
+        markShape(index)
+        publish()
+    }
+
+    private fun shapeForGain(shape: ToneShape, gain: Int): ToneShape {
+        return when (shape) {
+            ToneShape.Peak, ToneShape.PeakCut -> when {
+                gain > 0 -> ToneShape.Peak
+                gain < 0 -> ToneShape.PeakCut
+                else -> shape
+            }
+            else -> shape
+        }
+    }
+
     private fun markShape(index: Int) {
         toneShapeButtons[index].forEachIndexed { shapeIndex, button ->
             button.isSelected = ToneShape.entries[shapeIndex] == toneShapes[index]
         }
-        toneShapeHints[index].text = shapeHint(toneShapes[index])
     }
 
     private fun title(template: EqTemplate): String {
@@ -326,19 +356,21 @@ class EqActivity : AppCompatActivity() {
 
     private fun qToProgress(q: Float): Int = ((q - 0.5f) / 0.1f).roundToInt().coerceIn(0, QUALITY_STEPS)
 
-    private fun shapeLabel(shape: ToneShape): String {
+    private fun shapeIcon(shape: ToneShape): Int {
         return when (shape) {
-            ToneShape.Peak -> getString(R.string.tone_peak)
-            ToneShape.LowShelf -> getString(R.string.tone_low)
-            ToneShape.HighShelf -> getString(R.string.tone_high)
+            ToneShape.Peak -> R.drawable.ic_eq_peak_up
+            ToneShape.PeakCut -> R.drawable.ic_eq_peak_down
+            ToneShape.LowShelf -> R.drawable.ic_eq_low_shelf
+            ToneShape.HighShelf -> R.drawable.ic_eq_high_shelf
         }
     }
 
-    private fun shapeHint(shape: ToneShape): String {
+    private fun shapeDescription(shape: ToneShape): String {
         return when (shape) {
-            ToneShape.Peak -> getString(R.string.tone_peak_hint)
-            ToneShape.LowShelf -> getString(R.string.tone_low_hint)
-            ToneShape.HighShelf -> getString(R.string.tone_high_hint)
+            ToneShape.Peak -> getString(R.string.tone_peak_up)
+            ToneShape.PeakCut -> getString(R.string.tone_peak_down)
+            ToneShape.LowShelf -> getString(R.string.tone_low_shelf)
+            ToneShape.HighShelf -> getString(R.string.tone_high_shelf)
         }
     }
 

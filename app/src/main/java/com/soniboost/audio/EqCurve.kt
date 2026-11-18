@@ -8,6 +8,7 @@ import kotlin.math.sqrt
 
 enum class ToneShape {
     Peak,
+    PeakCut,
     LowShelf,
     HighShelf,
 }
@@ -28,7 +29,7 @@ data class ToneBand(
         val cosine = cos(omega)
         val sine = sin(omega)
         val (b0, b1, b2, a0, a1, a2) = when (shape) {
-            ToneShape.Peak -> peak(amplitude, cosine, sine, quality)
+            ToneShape.Peak, ToneShape.PeakCut -> peak(amplitude, cosine, sine, quality)
             ToneShape.LowShelf -> shelf(amplitude, cosine, sine, quality, high = false)
             ToneShape.HighShelf -> shelf(amplitude, cosine, sine, quality, high = true)
         }

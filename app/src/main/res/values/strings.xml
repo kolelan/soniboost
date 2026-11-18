@@ -41,12 +41,10 @@
     <string name="template_strong">Речевой буст сильнее</string>
     <string name="template_flat">Ровно</string>
     <string name="tone_band">Полоса %1$d</string>
-    <string name="tone_peak">Пик</string>
-    <string name="tone_low">Низ</string>
-    <string name="tone_high">Верх</string>
-    <string name="tone_peak_hint">Горб или яма только вокруг выбранной частоты. Остальной звук почти не меняется.</string>
-    <string name="tone_low_hint">Всё ниже этой частоты становится громче или тише. Выше — почти как было.</string>
-    <string name="tone_high_hint">Всё выше этой частоты становится громче или тише. Ниже — почти как было.</string>
+    <string name="tone_peak_up">Пик вверх</string>
+    <string name="tone_peak_down">Пик вниз</string>
+    <string name="tone_low_shelf">Полка снизу</string>
+    <string name="tone_high_shelf">Полка сверху</string>
     <string name="status_need_headphones">Подключите наушники. В динамик телефона звук не выводится: иначе микрофон ловит сам себя.</string>
     <string name="status_mic_denied">Без доступа к микрофону обработать речь нельзя.</string>
     <string name="status_focus_denied">Система не отдала звуковой фокус. Закройте другое приложение, которое занимает звук, и попробуйте снова.</string>
