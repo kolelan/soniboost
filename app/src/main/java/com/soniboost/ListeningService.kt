@@ -26,6 +26,8 @@ import com.soniboost.audio.SoundProfileLibrary
 import com.soniboost.audio.MicrophoneChoice
 import com.soniboost.audio.MicrophoneChoiceStore
 import com.soniboost.audio.PowerProfile
+import com.soniboost.audio.adaptivePace
+import com.soniboost.audio.allowsAdaptiveBoost
 import com.soniboost.audio.allowsFrequencyLowering
 import com.soniboost.audio.currentPowerProfile
 import com.soniboost.audio.powerProfileOf
@@ -77,7 +79,9 @@ class ListeningService : Service() {
             if (next == powerProfile) return
             powerProfile = next
             audioJobs.execute {
-                pipeline.applyLowering(profiles.active().lowering, next.allowsFrequencyLowering())
+                val profile = profiles.active()
+                pipeline.applyLowering(profile.lowering, next.allowsFrequencyLowering())
+                pipeline.applyAdaptive(profile.adaptive, next.allowsAdaptiveBoost(), next.adaptivePace())
             }
             if (engaged) updateNotification()
             publish()
@@ -124,6 +128,7 @@ class ListeningService : Service() {
             val profile = profiles.active()
             pipeline.updateCurve(profile.curve)
             pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
+            pipeline.applyAdaptive(profile.adaptive, powerProfile.allowsAdaptiveBoost(), powerProfile.adaptivePace())
             val result = pipeline.start(microphoneStore.get())
             mainHandler.post { if (!stopping) applyResult(result) }
         }
@@ -134,6 +139,7 @@ class ListeningService : Service() {
             val profile = profiles.active()
             pipeline.updateCurve(profile.curve)
             pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
+            pipeline.applyAdaptive(profile.adaptive, powerProfile.allowsAdaptiveBoost(), powerProfile.adaptivePace())
         }
     }
 
@@ -333,10 +339,17 @@ class ListeningService : Service() {
         }
         val listening = getString(R.string.notification_listening)
         val base = if (mic.isEmpty()) listening else "$listening $mic"
-        val paused = ::profiles.isInitialized &&
-            profiles.active().lowering.enabled &&
-            !powerProfile.allowsFrequencyLowering()
-        return if (paused) "$base ${getString(R.string.notification_lowering_paused)}" else base
+        if (!::profiles.isInitialized) return base
+        val profile = profiles.active()
+        val notes = buildList {
+            if (profile.lowering.enabled && !powerProfile.allowsFrequencyLowering()) {
+                add(getString(R.string.notification_lowering_paused))
+            }
+            if (profile.adaptive.enabled && !powerProfile.allowsAdaptiveBoost()) {
+                add(getString(R.string.notification_adaptive_paused))
+            }
+        }
+        return if (notes.isEmpty()) base else "$base ${notes.joinToString(" ")}"
     }
 
     private fun failureText(result: StartResult.Rejected): String {

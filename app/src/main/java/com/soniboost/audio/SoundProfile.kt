@@ -5,13 +5,14 @@ data class SoundProfile(
     val name: String,
     val curve: EqCurve,
     val lowering: LoweringSettings,
-    val adaptiveEnabled: Boolean = false,
+    val adaptive: AdaptiveSettings = AdaptiveSettings(),
     val builtin: Boolean,
     val description: String = "",
 )
 
 object SoundProfiles {
     const val CLARITY = "speech_clarity"
+    const val ADAPTIVE = "speech_adaptive"
     const val EVERYDAY = "scene_everyday"
     const val NOISE = "scene_noise"
     const val QUIET = "scene_quiet"
@@ -27,6 +28,7 @@ object SoundProfiles {
         profile(EqCurves.SPEECH, EqCurves.mild(), LoweringSettings()),
         profile(EqCurves.STRONG, EqCurves.strong(), LoweringSettings()),
         profile(CLARITY, clarityCurve(), LoweringSettings()),
+        profile(ADAPTIVE, EqCurves.mild(), LoweringSettings(), adaptive = AdaptiveSettings.moderate()),
         profile(EVERYDAY, bands(0, 0, -1, -1, 1, 3, 3, 1, 0, 0), LoweringSettings()),
         profile(NOISE, bands(0, -1, -4, -4, 1, 3, 6, 2, 0, 0), LoweringSettings(), peak(3_000, 3)),
         profile(QUIET, bands(0, 0, 0, 0, 0, 2, 3, 1, 0, 0), LoweringSettings(), peak(3_000, 2, 1f)),
@@ -47,8 +49,9 @@ object SoundProfiles {
         curve: EqCurve,
         lowering: LoweringSettings,
         tones: List<ToneBand> = curve.tones,
+        adaptive: AdaptiveSettings = AdaptiveSettings(),
     ): SoundProfile {
-        return SoundProfile(id, "", curve.copy(tones = tones), lowering, adaptiveEnabled = false, builtin = true)
+        return SoundProfile(id, "", curve.copy(tones = tones), lowering, adaptive, builtin = true)
     }
 
     private fun bands(vararg gain: Int): EqCurve = EqCurve(graphic = gain.toList())

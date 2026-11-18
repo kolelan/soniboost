@@ -23,6 +23,16 @@
     <string name="lowering_hz">%1$d Гц</string>
     <string name="lowering_mix_value">%1$d%%</string>
     <string name="notification_lowering_paused">Перенос частот выключен: бережём заряд.</string>
+    <string name="adaptive_title">Адаптивный буст</string>
+    <string name="adaptive_enable">Поднимать тихую речь</string>
+    <string name="adaptive_hint">Тихие куски около 2–4 кГц становятся громче, когда звук похож на речь. Сила — насколько громче. Осторожность — насколько звук должен быть похож на речь. Одного человека из нескольких не выбирает.</string>
+    <string name="adaptive_strength">Сила</string>
+    <string name="adaptive_caution">Осторожность</string>
+    <string name="adaptive_db">%1$d дБ</string>
+    <string name="adaptive_percent">%1$d%%</string>
+    <string name="notification_adaptive_paused">Адаптивный буст выключен: бережём заряд.</string>
+    <string name="template_adaptive">Адаптивная речь</string>
+    <string name="profile_adaptive_purpose">Речевой буст 1–4 кГц на 3 дБ. Дополнительно тихие куски около 2–4 кГц становятся громче, когда звук похож на речь. Одного человека из нескольких не выбирает.</string>
     <string name="action_start">Старт</string>
     <string name="action_stop">Стоп</string>
     <string name="status_ready">Можно слушать речь рядом</string>

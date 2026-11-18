@@ -46,7 +46,7 @@ class SoundProfileLibrary(context: Context) {
             current[existing].copy(
                 curve = profile.curve,
                 lowering = profile.lowering,
-                adaptiveEnabled = profile.adaptiveEnabled,
+                adaptive = profile.adaptive,
                 description = profile.description,
             )
         } else {
@@ -80,10 +80,10 @@ class SoundProfileLibrary(context: Context) {
         val active = if (builtin != null && curve == builtin.curve) {
             builtin.copy(lowering = if (id == EqCurves.SPEECH || id == EqCurves.STRONG || id == EqCurves.FLAT) lowering else builtin.lowering)
         } else {
-            SoundProfile("", "", curve, lowering, false, false)
+            SoundProfile("", "", curve, lowering, AdaptiveSettings(), false)
         }
         val imported = legacyEq.templates().filterNot { it.builtin }.map { template ->
-            SoundProfile(template.id, template.name, template.curve, LoweringSettings(), false, false)
+            SoundProfile(template.id, template.name, template.curve, LoweringSettings(), AdaptiveSettings(), false)
         }
         preferences.edit()
             .putString(USERS, encodeUsers(imported))
@@ -119,7 +119,7 @@ class SoundProfileLibrary(context: Context) {
             .put("description", profile.description)
             .put("curve", JSONObject(encodeCurve(profile.curve)))
             .put("lowering", encodeLowering(profile.lowering))
-            .put("adaptive", profile.adaptiveEnabled)
+            .put("adaptive", encodeAdaptive(profile.adaptive))
             .toString()
     }
 
@@ -134,7 +134,7 @@ class SoundProfileLibrary(context: Context) {
                 description = json.optString("description"),
                 curve = decodeCurve(json.getJSONObject("curve")) ?: EqCurves.mild(),
                 lowering = decodeLowering(json.optJSONObject("lowering")),
-                adaptiveEnabled = json.optBoolean("adaptive", false),
+                adaptive = decodeAdaptive(json),
                 builtin = SoundProfiles.byId(id) != null,
             )
         } catch (_: Exception) {
@@ -180,6 +180,26 @@ class SoundProfileLibrary(context: Context) {
             }
         }
         return EqCurve(graphic, tones)
+    }
+
+    private fun encodeAdaptive(settings: AdaptiveSettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("strength", settings.strengthDb)
+            .put("caution", settings.caution)
+    }
+
+    private fun decodeAdaptive(json: JSONObject): AdaptiveSettings {
+        val raw = json.opt("adaptive")
+        if (raw is Boolean) return AdaptiveSettings(enabled = raw)
+        val objectValue = raw as? JSONObject ?: return AdaptiveSettings()
+        return AdaptiveSettings(
+            enabled = objectValue.optBoolean("enabled", false),
+            strengthDb = objectValue.optInt("strength", AdaptiveSettings.DEFAULT_STRENGTH)
+                .coerceIn(AdaptiveSettings.MIN_STRENGTH, AdaptiveSettings.MAX_STRENGTH),
+            caution = objectValue.optInt("caution", AdaptiveSettings.DEFAULT_CAUTION)
+                .coerceIn(AdaptiveSettings.MIN_CAUTION, AdaptiveSettings.MAX_CAUTION),
+        )
     }
 
     private fun encodeLowering(settings: LoweringSettings): JSONObject {

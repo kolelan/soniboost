@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.ImageViewCompat
+import com.soniboost.audio.AdaptiveSettings
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.LoweringMethod
@@ -29,6 +30,7 @@ import com.soniboost.audio.SoundProfileLibrary
 import com.soniboost.audio.SoundProfiles
 import com.soniboost.audio.ToneBand
 import com.soniboost.audio.ToneShape
+import com.soniboost.audio.allowsAdaptiveBoost
 import com.soniboost.audio.allowsFrequencyLowering
 import com.soniboost.audio.currentPowerProfile
 import java.util.Locale
@@ -66,6 +68,12 @@ class EqActivity : AppCompatActivity() {
     private lateinit var amountValue: TextView
     private lateinit var mixSeek: SeekBar
     private lateinit var mixValue: TextView
+    private lateinit var adaptiveSwitch: SwitchCompat
+    private lateinit var adaptivePowerNote: TextView
+    private lateinit var strengthSeek: SeekBar
+    private lateinit var strengthValue: TextView
+    private lateinit var cautionSeek: SeekBar
+    private lateinit var cautionValue: TextView
     private var loweringMethod = LoweringMethod.Compression
     private var ratio = 2f
     private var shiftHz = 1_000
@@ -79,6 +87,7 @@ class EqActivity : AppCompatActivity() {
         profileDescription = findViewById(R.id.profileDescription)
         deleteButton = findViewById(R.id.deleteTemplateButton)
         bindLowering()
+        bindAdaptive()
         buildToneRows(findViewById(R.id.toneBands))
         buildGraphicRows(findViewById(R.id.graphicBands))
         findViewById<Button>(R.id.saveTemplateButton).setOnClickListener { askNameAndSave() }
@@ -140,6 +149,7 @@ class EqActivity : AppCompatActivity() {
             toneGainValues[index].text = dbText(band.gainDb)
         }
         showLowering(profile.lowering)
+        showAdaptive(profile.adaptive)
         showPurpose(profile)
         loading = false
         refreshPowerNote()
@@ -165,7 +175,7 @@ class EqActivity : AppCompatActivity() {
             name = "",
             curve = currentCurve(),
             lowering = currentLowering(),
-            adaptiveEnabled = false,
+            adaptive = currentAdaptive(),
             builtin = false,
         )
     }
@@ -342,6 +352,7 @@ class EqActivity : AppCompatActivity() {
             EqCurves.SPEECH -> getString(R.string.template_speech)
             EqCurves.STRONG -> getString(R.string.template_strong)
             SoundProfiles.CLARITY -> getString(R.string.template_clarity)
+            SoundProfiles.ADAPTIVE -> getString(R.string.template_adaptive)
             SoundProfiles.EVERYDAY -> getString(R.string.template_everyday)
             SoundProfiles.NOISE -> getString(R.string.template_noise)
             SoundProfiles.QUIET -> getString(R.string.template_quiet)
@@ -362,6 +373,7 @@ class EqActivity : AppCompatActivity() {
             EqCurves.SPEECH -> getString(R.string.profile_speech_purpose)
             EqCurves.STRONG -> getString(R.string.profile_strong_purpose)
             SoundProfiles.CLARITY -> getString(R.string.profile_clarity_purpose)
+            SoundProfiles.ADAPTIVE -> getString(R.string.profile_adaptive_purpose)
             SoundProfiles.EVERYDAY -> getString(R.string.profile_everyday_purpose)
             SoundProfiles.NOISE -> getString(R.string.profile_noise_purpose)
             SoundProfiles.QUIET -> getString(R.string.profile_quiet_purpose)
@@ -562,9 +574,55 @@ class EqActivity : AppCompatActivity() {
         mixValue.text = getString(R.string.lowering_mix_value, mixSeek.progress)
     }
 
+    private fun bindAdaptive() {
+        adaptiveSwitch = findViewById(R.id.adaptiveSwitch)
+        adaptivePowerNote = findViewById(R.id.adaptivePowerNote)
+        strengthSeek = findViewById(R.id.strengthSeek)
+        strengthValue = findViewById(R.id.strengthValue)
+        cautionSeek = findViewById(R.id.cautionSeek)
+        cautionValue = findViewById(R.id.cautionValue)
+        strengthSeek.setOnSeekBarChangeListener(loweringListener { showStrength(); publish() })
+        cautionSeek.setOnSeekBarChangeListener(loweringListener { showCaution(); publish() })
+        adaptiveSwitch.setOnCheckedChangeListener { _, checked ->
+            if (loading) return@setOnCheckedChangeListener
+            if (checked && strengthSeek.progress == 0) {
+                strengthSeek.progress = AdaptiveSettings.DEFAULT_STRENGTH
+                showStrength()
+            }
+            publish()
+        }
+    }
+
+    private fun showAdaptive(settings: AdaptiveSettings) {
+        adaptiveSwitch.isChecked = settings.enabled
+        strengthSeek.progress = settings.strengthDb.coerceIn(AdaptiveSettings.MIN_STRENGTH, AdaptiveSettings.MAX_STRENGTH)
+        cautionSeek.progress = settings.caution.coerceIn(AdaptiveSettings.MIN_CAUTION, AdaptiveSettings.MAX_CAUTION)
+        showStrength()
+        showCaution()
+    }
+
+    private fun currentAdaptive(): AdaptiveSettings {
+        return AdaptiveSettings(
+            enabled = adaptiveSwitch.isChecked,
+            strengthDb = strengthSeek.progress,
+            caution = cautionSeek.progress,
+        )
+    }
+
+    private fun showStrength() {
+        strengthValue.text = getString(R.string.adaptive_db, strengthSeek.progress)
+    }
+
+    private fun showCaution() {
+        cautionValue.text = getString(R.string.adaptive_percent, cautionSeek.progress)
+    }
+
     private fun refreshPowerNote() {
-        val blocked = loweringSwitch.isChecked && !currentPowerProfile().allowsFrequencyLowering()
-        powerNote.visibility = if (blocked) View.VISIBLE else View.GONE
+        val power = currentPowerProfile()
+        val loweringBlocked = loweringSwitch.isChecked && !power.allowsFrequencyLowering()
+        powerNote.visibility = if (loweringBlocked) View.VISIBLE else View.GONE
+        val adaptiveBlocked = adaptiveSwitch.isChecked && !power.allowsAdaptiveBoost()
+        adaptivePowerNote.visibility = if (adaptiveBlocked) View.VISIBLE else View.GONE
     }
 
     private fun loweringListener(onChange: () -> Unit): SeekBar.OnSeekBarChangeListener {
