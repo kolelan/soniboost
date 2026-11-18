@@ -59,6 +59,14 @@
                 android:text="@string/template_delete" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/restoreTemplateButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/template_restore" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

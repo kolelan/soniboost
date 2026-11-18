@@ -11,6 +11,10 @@ class SoundProfileLibrary(context: Context) {
 
     fun active(): SoundProfile {
         migrate()
+        val id = preferences.getString(ACTIVE_ID, null)
+        if (!id.isNullOrEmpty()) {
+            SoundProfiles.byId(id)?.let { return it }
+        }
         return decodeProfile(preferences.getString(ACTIVE, null)) ?: SoundProfiles.byId(EqCurves.SPEECH)!!
     }
 
@@ -24,9 +28,19 @@ class SoundProfileLibrary(context: Context) {
         return SoundProfiles.builtins() + users()
     }
 
+    fun originId(): String {
+        migrate()
+        val origin = preferences.getString(ORIGIN, null)
+        if (!origin.isNullOrEmpty()) return origin
+        val active = preferences.getString(ACTIVE_ID, null)
+        if (!active.isNullOrEmpty()) return active
+        return EqCurves.SPEECH
+    }
+
     fun use(profile: SoundProfile) {
         preferences.edit()
             .putString(ACTIVE_ID, profile.id)
+            .putString(ORIGIN, profile.id)
             .putString(ACTIVE, encodeProfile(profile))
             .apply()
     }
@@ -57,6 +71,7 @@ class SoundProfileLibrary(context: Context) {
         preferences.edit()
             .putString(USERS, encodeUsers(current))
             .putString(ACTIVE_ID, saved.id)
+            .putString(ORIGIN, saved.id)
             .putString(ACTIVE, encodeProfile(saved))
             .apply()
         return saved
@@ -67,7 +82,7 @@ class SoundProfileLibrary(context: Context) {
         val editor = preferences.edit().putString(USERS, encodeUsers(current))
         if (activeId() == id) {
             val flat = SoundProfiles.byId(EqCurves.FLAT)!!
-            editor.putString(ACTIVE_ID, flat.id).putString(ACTIVE, encodeProfile(flat))
+            editor.putString(ACTIVE_ID, flat.id).putString(ORIGIN, flat.id).putString(ACTIVE, encodeProfile(flat))
         }
         editor.apply()
     }
@@ -261,6 +276,7 @@ class SoundProfileLibrary(context: Context) {
         const val FILE = "soniboost"
         const val ACTIVE = "sound_profile"
         const val ACTIVE_ID = "sound_profile_id"
+        const val ORIGIN = "sound_profile_origin"
         const val USERS = "sound_profiles"
     }
 }

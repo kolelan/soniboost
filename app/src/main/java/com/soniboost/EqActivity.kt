@@ -104,8 +104,10 @@ class EqActivity : AppCompatActivity() {
         buildToneRows(findViewById(R.id.toneBands))
         buildGraphicRows(findViewById(R.id.graphicBands))
         findViewById<Button>(R.id.saveTemplateButton).setOnClickListener { askNameAndSave() }
+        findViewById<Button>(R.id.restoreTemplateButton).setOnClickListener { restoreSelected() }
         deleteButton.setOnClickListener { deleteSelected() }
-        reloadProfiles(selectId = library.activeId())
+        val shownId = library.activeId().ifEmpty { library.originId() }
+        reloadProfiles(selectId = shownId)
         show(library.active())
         loading = false
     }
@@ -236,6 +238,14 @@ class EqActivity : AppCompatActivity() {
             this.hint = hint
             setSingleLine()
         }
+    }
+
+    private fun restoreSelected() {
+        val profile = profiles.getOrNull(templateSpinner.selectedItemPosition) ?: return
+        library.use(profile)
+        show(profile)
+        deleteButton.isEnabled = !profile.builtin
+        ListeningService.applyProfile(this)
     }
 
     private fun deleteSelected() {
