@@ -8,6 +8,7 @@ data class SoundProfile(
     val adaptive: AdaptiveSettings = AdaptiveSettings(),
     val builtin: Boolean,
     val description: String = "",
+    val gate: NoiseGateSettings = NoiseGateSettings(),
 )
 
 object SoundProfiles {

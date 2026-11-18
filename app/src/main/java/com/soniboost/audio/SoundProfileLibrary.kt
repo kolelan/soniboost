@@ -47,6 +47,7 @@ class SoundProfileLibrary(context: Context) {
                 curve = profile.curve,
                 lowering = profile.lowering,
                 adaptive = profile.adaptive,
+                gate = profile.gate,
                 description = profile.description,
             )
         } else {
@@ -120,6 +121,7 @@ class SoundProfileLibrary(context: Context) {
             .put("curve", JSONObject(encodeCurve(profile.curve)))
             .put("lowering", encodeLowering(profile.lowering))
             .put("adaptive", encodeAdaptive(profile.adaptive))
+            .put("gate", encodeGate(profile.gate))
             .toString()
     }
 
@@ -135,6 +137,7 @@ class SoundProfileLibrary(context: Context) {
                 curve = decodeCurve(json.getJSONObject("curve")) ?: EqCurves.mild(),
                 lowering = decodeLowering(json.optJSONObject("lowering")),
                 adaptive = decodeAdaptive(json),
+                gate = decodeGate(json.optJSONObject("gate")),
                 builtin = SoundProfiles.byId(id) != null,
             )
         } catch (_: Exception) {
@@ -180,6 +183,33 @@ class SoundProfileLibrary(context: Context) {
             }
         }
         return EqCurve(graphic, tones)
+    }
+
+    private fun encodeGate(settings: NoiseGateSettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("threshold", settings.thresholdDb)
+            .put("depth", settings.depthDb)
+            .put("attack", settings.attackMs)
+            .put("hold", settings.holdMs)
+            .put("release", settings.releaseMs)
+    }
+
+    private fun decodeGate(json: JSONObject?): NoiseGateSettings {
+        if (json == null) return NoiseGateSettings()
+        return NoiseGateSettings(
+            enabled = json.optBoolean("enabled", false),
+            thresholdDb = json.optInt("threshold", NoiseGateSettings.DEFAULT_THRESHOLD)
+                .coerceIn(NoiseGateSettings.MIN_THRESHOLD, NoiseGateSettings.MAX_THRESHOLD),
+            depthDb = json.optInt("depth", NoiseGateSettings.DEFAULT_DEPTH)
+                .coerceIn(NoiseGateSettings.MIN_DEPTH, NoiseGateSettings.MAX_DEPTH),
+            attackMs = json.optInt("attack", NoiseGateSettings.DEFAULT_ATTACK)
+                .coerceIn(NoiseGateSettings.MIN_ATTACK, NoiseGateSettings.MAX_ATTACK),
+            holdMs = json.optInt("hold", NoiseGateSettings.DEFAULT_HOLD)
+                .coerceIn(NoiseGateSettings.MIN_HOLD, NoiseGateSettings.MAX_HOLD),
+            releaseMs = json.optInt("release", NoiseGateSettings.DEFAULT_RELEASE)
+                .coerceIn(NoiseGateSettings.MIN_RELEASE, NoiseGateSettings.MAX_RELEASE),
+        )
     }
 
     private fun encodeAdaptive(settings: AdaptiveSettings): JSONObject {

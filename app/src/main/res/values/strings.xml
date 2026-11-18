@@ -52,6 +52,16 @@
     <string name="status_bluetooth_denied">Без доступа к Bluetooth микрофон наушников не включить.</string>
     <string name="eq_title">Эквалайзер</string>
     <string name="eq_graphic">Графические полосы</string>
+    <string name="gate_title">Отсечка шума</string>
+    <string name="gate_enable">Приглушать звук ниже порога</string>
+    <string name="gate_hint">Стоит в самом начале, до усиления. Ниже порога звук становится тише на выбранную глубину. Открытие возвращает звук, удержание держит паузу между словами, закрытие приглушает шум. Это не шумодав наушников.</string>
+    <string name="gate_threshold">Порог</string>
+    <string name="gate_depth">Глубина</string>
+    <string name="gate_attack">Открытие</string>
+    <string name="gate_hold">Удержание</string>
+    <string name="gate_release">Закрытие</string>
+    <string name="gate_db">%1$d дБ</string>
+    <string name="gate_ms">%1$d мс</string>
     <string name="eq_parametric">Точные полосы</string>
     <string name="eq_parametric_hint">Частота, добротность и форма. Усиление 0 выключает полосу.</string>
     <string name="eq_frequency">Частота</string>

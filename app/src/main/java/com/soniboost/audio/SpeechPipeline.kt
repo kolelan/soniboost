@@ -28,7 +28,7 @@ sealed interface StartResult {
 }
 
 /**
- * Микрофон → точные полосы → перенос высоких частот → адаптивный буст → графический эквалайзер → лимитер → наушники.
+ * Микрофон → отсечка шума → точные полосы → перенос высоких частот → адаптивный буст → графический эквалайзер → лимитер → наушники.
  * Лимитер системный и вешается на сессию [AudioTrack]: эксклюзивный Oboe часто обходит этот путь.
  */
 class SpeechPipeline(context: Context) {
@@ -55,6 +55,7 @@ class SpeechPipeline(context: Context) {
     private var graphicGains = EqCurves.mild().graphic
     private var toneBands = EqCurves.mild().tones
     private val toneFilters = Array(EqCurve.TONE_COUNT) { Biquad() }
+    private val noiseGate = NoiseGate()
     private val lowerer = FrequencyLowerer()
     private val booster = AdaptiveBooster()
     private var loweringSettings = LoweringSettings()
@@ -62,6 +63,7 @@ class SpeechPipeline(context: Context) {
     private var adaptiveSettings = AdaptiveSettings()
     private var adaptiveAllowed = true
     private var adaptivePace = 1f
+    private var gateSettings = NoiseGateSettings()
     private var focusRequest: AudioFocusRequest? = null
 
     var microphone: MicrophoneChoice = MicrophoneChoice.Phone
@@ -235,6 +237,7 @@ class SpeechPipeline(context: Context) {
             if (!capturing) break
             if (read < 0) break
             if (read == 0) continue
+            noiseGate.process(buffer, read)
             shape(buffer, read)
             lowerer.process(buffer, read)
             booster.process(buffer, read)
@@ -276,6 +279,7 @@ class SpeechPipeline(context: Context) {
         prepared.playbackDevice?.let { player.setPreferredDevice(it) }
         outputBufferMs = player.bufferSizeInFrames * 1_000 / sampleRate
         sampleRateHz = sampleRate
+        noiseGate.configure(gateSettings, sampleRate)
         lowerer.configure(loweringSettings, loweringAllowed, sampleRate)
         booster.configure(adaptiveSettings, adaptiveAllowed, adaptivePace, sampleRate)
         pushTones()
@@ -354,6 +358,11 @@ class SpeechPipeline(context: Context) {
         )
         processing.enabled = true
         return processing
+    }
+
+    fun applyGate(settings: NoiseGateSettings) {
+        gateSettings = settings
+        noiseGate.configure(settings, sampleRateHz)
     }
 
     fun applyLowering(settings: LoweringSettings, allowed: Boolean) {

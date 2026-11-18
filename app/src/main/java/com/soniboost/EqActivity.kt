@@ -23,6 +23,7 @@ import com.soniboost.audio.AdaptiveSettings
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.LoweringMethod
+import com.soniboost.audio.NoiseGateSettings
 import com.soniboost.audio.LoweringSettings
 import com.soniboost.audio.LoweringStore
 import com.soniboost.audio.SoundProfile
@@ -74,6 +75,17 @@ class EqActivity : AppCompatActivity() {
     private lateinit var strengthValue: TextView
     private lateinit var cautionSeek: SeekBar
     private lateinit var cautionValue: TextView
+    private lateinit var gateSwitch: SwitchCompat
+    private lateinit var gateThresholdSeek: SeekBar
+    private lateinit var gateThresholdValue: TextView
+    private lateinit var gateDepthSeek: SeekBar
+    private lateinit var gateDepthValue: TextView
+    private lateinit var gateAttackSeek: SeekBar
+    private lateinit var gateAttackValue: TextView
+    private lateinit var gateHoldSeek: SeekBar
+    private lateinit var gateHoldValue: TextView
+    private lateinit var gateReleaseSeek: SeekBar
+    private lateinit var gateReleaseValue: TextView
     private var loweringMethod = LoweringMethod.Compression
     private var ratio = 2f
     private var shiftHz = 1_000
@@ -86,6 +98,7 @@ class EqActivity : AppCompatActivity() {
         templateSpinner = findViewById(R.id.templateSpinner)
         profileDescription = findViewById(R.id.profileDescription)
         deleteButton = findViewById(R.id.deleteTemplateButton)
+        bindGate()
         bindLowering()
         bindAdaptive()
         buildToneRows(findViewById(R.id.toneBands))
@@ -148,6 +161,7 @@ class EqActivity : AppCompatActivity() {
             toneGainSeeks[index].progress = band.gainDb - EqCurve.MIN_DB
             toneGainValues[index].text = dbText(band.gainDb)
         }
+        showGate(profile.gate)
         showLowering(profile.lowering)
         showAdaptive(profile.adaptive)
         showPurpose(profile)
@@ -176,6 +190,7 @@ class EqActivity : AppCompatActivity() {
             curve = currentCurve(),
             lowering = currentLowering(),
             adaptive = currentAdaptive(),
+            gate = currentGate(),
             builtin = false,
         )
     }
@@ -572,6 +587,79 @@ class EqActivity : AppCompatActivity() {
 
     private fun showMix() {
         mixValue.text = getString(R.string.lowering_mix_value, mixSeek.progress)
+    }
+
+    private fun bindGate() {
+        gateSwitch = findViewById(R.id.gateSwitch)
+        gateThresholdSeek = findViewById(R.id.gateThresholdSeek)
+        gateThresholdValue = findViewById(R.id.gateThresholdValue)
+        gateDepthSeek = findViewById(R.id.gateDepthSeek)
+        gateDepthValue = findViewById(R.id.gateDepthValue)
+        gateAttackSeek = findViewById(R.id.gateAttackSeek)
+        gateAttackValue = findViewById(R.id.gateAttackValue)
+        gateHoldSeek = findViewById(R.id.gateHoldSeek)
+        gateHoldValue = findViewById(R.id.gateHoldValue)
+        gateReleaseSeek = findViewById(R.id.gateReleaseSeek)
+        gateReleaseValue = findViewById(R.id.gateReleaseValue)
+        gateThresholdSeek.setOnSeekBarChangeListener(loweringListener { showGateThreshold(); publish() })
+        gateDepthSeek.setOnSeekBarChangeListener(loweringListener { showGateDepth(); publish() })
+        gateAttackSeek.setOnSeekBarChangeListener(loweringListener { showGateAttack(); publish() })
+        gateHoldSeek.setOnSeekBarChangeListener(loweringListener { showGateHold(); publish() })
+        gateReleaseSeek.setOnSeekBarChangeListener(loweringListener { showGateRelease(); publish() })
+        gateSwitch.setOnCheckedChangeListener { _, _ -> if (!loading) publish() }
+    }
+
+    private fun showGate(settings: NoiseGateSettings) {
+        gateSwitch.isChecked = settings.enabled
+        gateThresholdSeek.progress = (settings.thresholdDb - NoiseGateSettings.MIN_THRESHOLD)
+            .coerceIn(0, NoiseGateSettings.MAX_THRESHOLD - NoiseGateSettings.MIN_THRESHOLD)
+        gateDepthSeek.progress = (settings.depthDb - NoiseGateSettings.MIN_DEPTH)
+            .coerceIn(0, NoiseGateSettings.MAX_DEPTH - NoiseGateSettings.MIN_DEPTH)
+        gateAttackSeek.progress = (settings.attackMs - NoiseGateSettings.MIN_ATTACK)
+            .coerceIn(0, NoiseGateSettings.MAX_ATTACK - NoiseGateSettings.MIN_ATTACK)
+        gateHoldSeek.progress = (settings.holdMs / NoiseGateSettings.HOLD_STEP)
+            .coerceIn(0, NoiseGateSettings.MAX_HOLD / NoiseGateSettings.HOLD_STEP)
+        gateReleaseSeek.progress = ((settings.releaseMs - NoiseGateSettings.MIN_RELEASE) / NoiseGateSettings.RELEASE_STEP)
+            .coerceIn(0, (NoiseGateSettings.MAX_RELEASE - NoiseGateSettings.MIN_RELEASE) / NoiseGateSettings.RELEASE_STEP)
+        showGateThreshold()
+        showGateDepth()
+        showGateAttack()
+        showGateHold()
+        showGateRelease()
+    }
+
+    private fun currentGate(): NoiseGateSettings {
+        return NoiseGateSettings(
+            enabled = gateSwitch.isChecked,
+            thresholdDb = NoiseGateSettings.MIN_THRESHOLD + gateThresholdSeek.progress,
+            depthDb = NoiseGateSettings.MIN_DEPTH + gateDepthSeek.progress,
+            attackMs = NoiseGateSettings.MIN_ATTACK + gateAttackSeek.progress,
+            holdMs = gateHoldSeek.progress * NoiseGateSettings.HOLD_STEP,
+            releaseMs = NoiseGateSettings.MIN_RELEASE + gateReleaseSeek.progress * NoiseGateSettings.RELEASE_STEP,
+        )
+    }
+
+    private fun showGateThreshold() {
+        val db = NoiseGateSettings.MIN_THRESHOLD + gateThresholdSeek.progress
+        gateThresholdValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showGateDepth() {
+        val db = NoiseGateSettings.MIN_DEPTH + gateDepthSeek.progress
+        gateDepthValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showGateAttack() {
+        gateAttackValue.text = getString(R.string.gate_ms, NoiseGateSettings.MIN_ATTACK + gateAttackSeek.progress)
+    }
+
+    private fun showGateHold() {
+        gateHoldValue.text = getString(R.string.gate_ms, gateHoldSeek.progress * NoiseGateSettings.HOLD_STEP)
+    }
+
+    private fun showGateRelease() {
+        val ms = NoiseGateSettings.MIN_RELEASE + gateReleaseSeek.progress * NoiseGateSettings.RELEASE_STEP
+        gateReleaseValue.text = getString(R.string.gate_ms, ms)
     }
 
     private fun bindAdaptive() {
