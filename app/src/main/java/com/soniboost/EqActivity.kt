@@ -19,9 +19,13 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.ImageViewCompat
+import com.soniboost.audio.AdaptiveSettings
+import com.soniboost.audio.ClaritySettings
+import com.soniboost.audio.OutputLevel
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.LoweringMethod
+import com.soniboost.audio.NoiseGateSettings
 import com.soniboost.audio.LoweringSettings
 import com.soniboost.audio.LoweringStore
 import com.soniboost.audio.SoundProfile
@@ -29,6 +33,7 @@ import com.soniboost.audio.SoundProfileLibrary
 import com.soniboost.audio.SoundProfiles
 import com.soniboost.audio.ToneBand
 import com.soniboost.audio.ToneShape
+import com.soniboost.audio.allowsAdaptiveBoost
 import com.soniboost.audio.allowsFrequencyLowering
 import com.soniboost.audio.currentPowerProfile
 import java.util.Locale
@@ -66,6 +71,30 @@ class EqActivity : AppCompatActivity() {
     private lateinit var amountValue: TextView
     private lateinit var mixSeek: SeekBar
     private lateinit var mixValue: TextView
+    private lateinit var adaptiveSwitch: SwitchCompat
+    private lateinit var adaptivePowerNote: TextView
+    private lateinit var strengthSeek: SeekBar
+    private lateinit var strengthValue: TextView
+    private lateinit var cautionSeek: SeekBar
+    private lateinit var cautionValue: TextView
+    private lateinit var gateSwitch: SwitchCompat
+    private lateinit var gateThresholdSeek: SeekBar
+    private lateinit var gateThresholdValue: TextView
+    private lateinit var gateDepthSeek: SeekBar
+    private lateinit var gateDepthValue: TextView
+    private lateinit var gateAttackSeek: SeekBar
+    private lateinit var gateAttackValue: TextView
+    private lateinit var gateHoldSeek: SeekBar
+    private lateinit var gateHoldValue: TextView
+    private lateinit var gateReleaseSeek: SeekBar
+    private lateinit var gateReleaseValue: TextView
+    private lateinit var claritySwitch: SwitchCompat
+    private lateinit var clarityStrengthSeek: SeekBar
+    private lateinit var clarityStrengthValue: TextView
+    private lateinit var clarityThresholdSeek: SeekBar
+    private lateinit var clarityThresholdValue: TextView
+    private lateinit var limiterSeek: SeekBar
+    private lateinit var limiterValue: TextView
     private var loweringMethod = LoweringMethod.Compression
     private var ratio = 2f
     private var shiftHz = 1_000
@@ -78,12 +107,17 @@ class EqActivity : AppCompatActivity() {
         templateSpinner = findViewById(R.id.templateSpinner)
         profileDescription = findViewById(R.id.profileDescription)
         deleteButton = findViewById(R.id.deleteTemplateButton)
+        bindGate()
+        bindOutput()
         bindLowering()
+        bindAdaptive()
         buildToneRows(findViewById(R.id.toneBands))
         buildGraphicRows(findViewById(R.id.graphicBands))
         findViewById<Button>(R.id.saveTemplateButton).setOnClickListener { askNameAndSave() }
+        findViewById<Button>(R.id.restoreTemplateButton).setOnClickListener { restoreSelected() }
         deleteButton.setOnClickListener { deleteSelected() }
-        reloadProfiles(selectId = library.activeId())
+        val shownId = library.activeId().ifEmpty { library.originId() }
+        reloadProfiles(selectId = shownId)
         show(library.active())
         loading = false
     }
@@ -139,7 +173,11 @@ class EqActivity : AppCompatActivity() {
             toneGainSeeks[index].progress = band.gainDb - EqCurve.MIN_DB
             toneGainValues[index].text = dbText(band.gainDb)
         }
+        showGate(profile.gate)
         showLowering(profile.lowering)
+        showAdaptive(profile.adaptive)
+        showClarity(profile.clarity)
+        showLimiter(profile.limiterDb)
         showPurpose(profile)
         loading = false
         refreshPowerNote()
@@ -165,7 +203,10 @@ class EqActivity : AppCompatActivity() {
             name = "",
             curve = currentCurve(),
             lowering = currentLowering(),
-            adaptiveEnabled = false,
+            adaptive = currentAdaptive(),
+            gate = currentGate(),
+            clarity = currentClarity(),
+            limiterDb = currentLimiter(),
             builtin = false,
         )
     }
@@ -211,6 +252,14 @@ class EqActivity : AppCompatActivity() {
             this.hint = hint
             setSingleLine()
         }
+    }
+
+    private fun restoreSelected() {
+        val profile = profiles.getOrNull(templateSpinner.selectedItemPosition) ?: return
+        library.use(profile)
+        show(profile)
+        deleteButton.isEnabled = !profile.builtin
+        ListeningService.applyProfile(this)
     }
 
     private fun deleteSelected() {
@@ -342,6 +391,7 @@ class EqActivity : AppCompatActivity() {
             EqCurves.SPEECH -> getString(R.string.template_speech)
             EqCurves.STRONG -> getString(R.string.template_strong)
             SoundProfiles.CLARITY -> getString(R.string.template_clarity)
+            SoundProfiles.ADAPTIVE -> getString(R.string.template_adaptive)
             SoundProfiles.EVERYDAY -> getString(R.string.template_everyday)
             SoundProfiles.NOISE -> getString(R.string.template_noise)
             SoundProfiles.QUIET -> getString(R.string.template_quiet)
@@ -362,6 +412,7 @@ class EqActivity : AppCompatActivity() {
             EqCurves.SPEECH -> getString(R.string.profile_speech_purpose)
             EqCurves.STRONG -> getString(R.string.profile_strong_purpose)
             SoundProfiles.CLARITY -> getString(R.string.profile_clarity_purpose)
+            SoundProfiles.ADAPTIVE -> getString(R.string.profile_adaptive_purpose)
             SoundProfiles.EVERYDAY -> getString(R.string.profile_everyday_purpose)
             SoundProfiles.NOISE -> getString(R.string.profile_noise_purpose)
             SoundProfiles.QUIET -> getString(R.string.profile_quiet_purpose)
@@ -562,9 +613,187 @@ class EqActivity : AppCompatActivity() {
         mixValue.text = getString(R.string.lowering_mix_value, mixSeek.progress)
     }
 
+    private fun bindOutput() {
+        claritySwitch = findViewById(R.id.claritySwitch)
+        clarityStrengthSeek = findViewById(R.id.clarityStrengthSeek)
+        clarityStrengthValue = findViewById(R.id.clarityStrengthValue)
+        clarityThresholdSeek = findViewById(R.id.clarityThresholdSeek)
+        clarityThresholdValue = findViewById(R.id.clarityThresholdValue)
+        limiterSeek = findViewById(R.id.limiterSeek)
+        limiterValue = findViewById(R.id.limiterValue)
+        clarityStrengthSeek.setOnSeekBarChangeListener(loweringListener { showClarityStrength(); publish() })
+        clarityThresholdSeek.setOnSeekBarChangeListener(loweringListener { showClarityThreshold(); publish() })
+        limiterSeek.setOnSeekBarChangeListener(loweringListener { showLimiterValue(); publish() })
+        claritySwitch.setOnCheckedChangeListener { _, checked ->
+            if (loading) return@setOnCheckedChangeListener
+            if (checked && clarityStrengthSeek.progress == 0) {
+                clarityStrengthSeek.progress = ClaritySettings.DEFAULT_STRENGTH
+                showClarityStrength()
+            }
+            publish()
+        }
+    }
+
+    private fun showClarity(settings: ClaritySettings) {
+        claritySwitch.isChecked = settings.enabled
+        clarityStrengthSeek.progress = settings.strength.coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH)
+        clarityThresholdSeek.progress = (settings.thresholdDb - ClaritySettings.MIN_THRESHOLD)
+            .coerceIn(0, ClaritySettings.MAX_THRESHOLD - ClaritySettings.MIN_THRESHOLD)
+        showClarityStrength()
+        showClarityThreshold()
+    }
+
+    private fun currentClarity(): ClaritySettings {
+        return ClaritySettings(
+            enabled = claritySwitch.isChecked,
+            strength = clarityStrengthSeek.progress,
+            thresholdDb = ClaritySettings.MIN_THRESHOLD + clarityThresholdSeek.progress,
+        )
+    }
+
+    private fun showClarityStrength() {
+        clarityStrengthValue.text = getString(R.string.gate_db, clarityStrengthSeek.progress)
+    }
+
+    private fun showClarityThreshold() {
+        val db = ClaritySettings.MIN_THRESHOLD + clarityThresholdSeek.progress
+        clarityThresholdValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showLimiter(thresholdDb: Int) {
+        limiterSeek.progress = (thresholdDb - OutputLevel.MIN_DB)
+            .coerceIn(0, OutputLevel.MAX_DB - OutputLevel.MIN_DB)
+        showLimiterValue()
+    }
+
+    private fun currentLimiter(): Int = OutputLevel.MIN_DB + limiterSeek.progress
+
+    private fun showLimiterValue() {
+        limiterValue.text = getString(R.string.gate_db, currentLimiter())
+    }
+
+    private fun bindGate() {
+        gateSwitch = findViewById(R.id.gateSwitch)
+        gateThresholdSeek = findViewById(R.id.gateThresholdSeek)
+        gateThresholdValue = findViewById(R.id.gateThresholdValue)
+        gateDepthSeek = findViewById(R.id.gateDepthSeek)
+        gateDepthValue = findViewById(R.id.gateDepthValue)
+        gateAttackSeek = findViewById(R.id.gateAttackSeek)
+        gateAttackValue = findViewById(R.id.gateAttackValue)
+        gateHoldSeek = findViewById(R.id.gateHoldSeek)
+        gateHoldValue = findViewById(R.id.gateHoldValue)
+        gateReleaseSeek = findViewById(R.id.gateReleaseSeek)
+        gateReleaseValue = findViewById(R.id.gateReleaseValue)
+        gateThresholdSeek.setOnSeekBarChangeListener(loweringListener { showGateThreshold(); publish() })
+        gateDepthSeek.setOnSeekBarChangeListener(loweringListener { showGateDepth(); publish() })
+        gateAttackSeek.setOnSeekBarChangeListener(loweringListener { showGateAttack(); publish() })
+        gateHoldSeek.setOnSeekBarChangeListener(loweringListener { showGateHold(); publish() })
+        gateReleaseSeek.setOnSeekBarChangeListener(loweringListener { showGateRelease(); publish() })
+        gateSwitch.setOnCheckedChangeListener { _, _ -> if (!loading) publish() }
+    }
+
+    private fun showGate(settings: NoiseGateSettings) {
+        gateSwitch.isChecked = settings.enabled
+        gateThresholdSeek.progress = (settings.thresholdDb - NoiseGateSettings.MIN_THRESHOLD)
+            .coerceIn(0, NoiseGateSettings.MAX_THRESHOLD - NoiseGateSettings.MIN_THRESHOLD)
+        gateDepthSeek.progress = (settings.depthDb - NoiseGateSettings.MIN_DEPTH)
+            .coerceIn(0, NoiseGateSettings.MAX_DEPTH - NoiseGateSettings.MIN_DEPTH)
+        gateAttackSeek.progress = (settings.attackMs - NoiseGateSettings.MIN_ATTACK)
+            .coerceIn(0, NoiseGateSettings.MAX_ATTACK - NoiseGateSettings.MIN_ATTACK)
+        gateHoldSeek.progress = (settings.holdMs / NoiseGateSettings.HOLD_STEP)
+            .coerceIn(0, NoiseGateSettings.MAX_HOLD / NoiseGateSettings.HOLD_STEP)
+        gateReleaseSeek.progress = ((settings.releaseMs - NoiseGateSettings.MIN_RELEASE) / NoiseGateSettings.RELEASE_STEP)
+            .coerceIn(0, (NoiseGateSettings.MAX_RELEASE - NoiseGateSettings.MIN_RELEASE) / NoiseGateSettings.RELEASE_STEP)
+        showGateThreshold()
+        showGateDepth()
+        showGateAttack()
+        showGateHold()
+        showGateRelease()
+    }
+
+    private fun currentGate(): NoiseGateSettings {
+        return NoiseGateSettings(
+            enabled = gateSwitch.isChecked,
+            thresholdDb = NoiseGateSettings.MIN_THRESHOLD + gateThresholdSeek.progress,
+            depthDb = NoiseGateSettings.MIN_DEPTH + gateDepthSeek.progress,
+            attackMs = NoiseGateSettings.MIN_ATTACK + gateAttackSeek.progress,
+            holdMs = gateHoldSeek.progress * NoiseGateSettings.HOLD_STEP,
+            releaseMs = NoiseGateSettings.MIN_RELEASE + gateReleaseSeek.progress * NoiseGateSettings.RELEASE_STEP,
+        )
+    }
+
+    private fun showGateThreshold() {
+        val db = NoiseGateSettings.MIN_THRESHOLD + gateThresholdSeek.progress
+        gateThresholdValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showGateDepth() {
+        val db = NoiseGateSettings.MIN_DEPTH + gateDepthSeek.progress
+        gateDepthValue.text = getString(R.string.gate_db, db)
+    }
+
+    private fun showGateAttack() {
+        gateAttackValue.text = getString(R.string.gate_ms, NoiseGateSettings.MIN_ATTACK + gateAttackSeek.progress)
+    }
+
+    private fun showGateHold() {
+        gateHoldValue.text = getString(R.string.gate_ms, gateHoldSeek.progress * NoiseGateSettings.HOLD_STEP)
+    }
+
+    private fun showGateRelease() {
+        val ms = NoiseGateSettings.MIN_RELEASE + gateReleaseSeek.progress * NoiseGateSettings.RELEASE_STEP
+        gateReleaseValue.text = getString(R.string.gate_ms, ms)
+    }
+
+    private fun bindAdaptive() {
+        adaptiveSwitch = findViewById(R.id.adaptiveSwitch)
+        adaptivePowerNote = findViewById(R.id.adaptivePowerNote)
+        strengthSeek = findViewById(R.id.strengthSeek)
+        strengthValue = findViewById(R.id.strengthValue)
+        cautionSeek = findViewById(R.id.cautionSeek)
+        cautionValue = findViewById(R.id.cautionValue)
+        strengthSeek.setOnSeekBarChangeListener(loweringListener { showStrength(); publish() })
+        cautionSeek.setOnSeekBarChangeListener(loweringListener { showCaution(); publish() })
+        adaptiveSwitch.setOnCheckedChangeListener { _, checked ->
+            if (loading) return@setOnCheckedChangeListener
+            if (checked && strengthSeek.progress == 0) {
+                strengthSeek.progress = AdaptiveSettings.DEFAULT_STRENGTH
+                showStrength()
+            }
+            publish()
+        }
+    }
+
+    private fun showAdaptive(settings: AdaptiveSettings) {
+        adaptiveSwitch.isChecked = settings.enabled
+        strengthSeek.progress = settings.strengthDb.coerceIn(AdaptiveSettings.MIN_STRENGTH, AdaptiveSettings.MAX_STRENGTH)
+        cautionSeek.progress = settings.caution.coerceIn(AdaptiveSettings.MIN_CAUTION, AdaptiveSettings.MAX_CAUTION)
+        showStrength()
+        showCaution()
+    }
+
+    private fun currentAdaptive(): AdaptiveSettings {
+        return AdaptiveSettings(
+            enabled = adaptiveSwitch.isChecked,
+            strengthDb = strengthSeek.progress,
+            caution = cautionSeek.progress,
+        )
+    }
+
+    private fun showStrength() {
+        strengthValue.text = getString(R.string.adaptive_db, strengthSeek.progress)
+    }
+
+    private fun showCaution() {
+        cautionValue.text = getString(R.string.adaptive_percent, cautionSeek.progress)
+    }
+
     private fun refreshPowerNote() {
-        val blocked = loweringSwitch.isChecked && !currentPowerProfile().allowsFrequencyLowering()
-        powerNote.visibility = if (blocked) View.VISIBLE else View.GONE
+        val power = currentPowerProfile()
+        val loweringBlocked = loweringSwitch.isChecked && !power.allowsFrequencyLowering()
+        powerNote.visibility = if (loweringBlocked) View.VISIBLE else View.GONE
+        val adaptiveBlocked = adaptiveSwitch.isChecked && !power.allowsAdaptiveBoost()
+        adaptivePowerNote.visibility = if (adaptiveBlocked) View.VISIBLE else View.GONE
     }
 
     private fun loweringListener(onChange: () -> Unit): SeekBar.OnSeekBarChangeListener {

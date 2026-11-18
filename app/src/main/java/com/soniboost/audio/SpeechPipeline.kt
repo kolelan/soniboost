@@ -28,7 +28,7 @@ sealed interface StartResult {
 }
 
 /**
- * Микрофон → точные полосы → перенос высоких частот → графический эквалайзер → лимитер → наушники.
+ * Микрофон → отсечка шума → точные полосы → перенос высоких частот → адаптивный буст → графический эквалайзер → чёткость речи → лимитер → наушники.
  * Лимитер системный и вешается на сессию [AudioTrack]: эксклюзивный Oboe часто обходит этот путь.
  */
 class SpeechPipeline(context: Context) {
@@ -55,9 +55,17 @@ class SpeechPipeline(context: Context) {
     private var graphicGains = EqCurves.mild().graphic
     private var toneBands = EqCurves.mild().tones
     private val toneFilters = Array(EqCurve.TONE_COUNT) { Biquad() }
+    private val noiseGate = NoiseGate()
     private val lowerer = FrequencyLowerer()
+    private val booster = AdaptiveBooster()
     private var loweringSettings = LoweringSettings()
     private var loweringAllowed = true
+    private var adaptiveSettings = AdaptiveSettings()
+    private var adaptiveAllowed = true
+    private var adaptivePace = 1f
+    private var gateSettings = NoiseGateSettings()
+    private var clarity = ClaritySettings()
+    private var limiterDb = OutputLevel.DEFAULT_DB
     private var focusRequest: AudioFocusRequest? = null
 
     var microphone: MicrophoneChoice = MicrophoneChoice.Phone
@@ -231,8 +239,10 @@ class SpeechPipeline(context: Context) {
             if (!capturing) break
             if (read < 0) break
             if (read == 0) continue
+            noiseGate.process(buffer, read)
             shape(buffer, read)
             lowerer.process(buffer, read)
+            booster.process(buffer, read)
             val written = player.write(buffer, 0, read, AudioTrack.WRITE_BLOCKING)
             if (written < 0) break
         }
@@ -271,7 +281,9 @@ class SpeechPipeline(context: Context) {
         prepared.playbackDevice?.let { player.setPreferredDevice(it) }
         outputBufferMs = player.bufferSizeInFrames * 1_000 / sampleRate
         sampleRateHz = sampleRate
+        noiseGate.configure(gateSettings, sampleRate)
         lowerer.configure(loweringSettings, loweringAllowed, sampleRate)
+        booster.configure(adaptiveSettings, adaptiveAllowed, adaptivePace, sampleRate)
         pushTones()
         effect = speechEffect(player.audioSessionId)
         record = openMicrophone(prepared, sampleRate, encoding, channelIn, recordBytes)
@@ -326,34 +338,49 @@ class SpeechPipeline(context: Context) {
             1,
             true,
             EqCurve.BAND_COUNT,
-            false,
-            0,
+            true,
+            ClaritySettings.BAND_COUNT,
             false,
             0,
             true,
         ).build()
         val processing = DynamicsProcessing(0, sessionId, config)
         processing.setPreEqAllChannelsTo(graphicEq())
-        processing.setLimiterAllChannelsTo(
-            DynamicsProcessing.Limiter(
-                true,
-                true,
-                0,
-                LIMITER_ATTACK_MS,
-                LIMITER_RELEASE_MS,
-                LIMITER_RATIO,
-                LIMITER_THRESHOLD_DB,
-                0f,
-            )
-        )
+        processing.setMbcAllChannelsTo(clarityStage())
+        processing.setLimiterAllChannelsTo(limiterStage())
         processing.enabled = true
         return processing
+    }
+
+    fun applyGate(settings: NoiseGateSettings) {
+        gateSettings = settings
+        noiseGate.configure(settings, sampleRateHz)
     }
 
     fun applyLowering(settings: LoweringSettings, allowed: Boolean) {
         loweringSettings = settings
         loweringAllowed = allowed
         lowerer.configure(settings, allowed, sampleRateHz)
+    }
+
+    fun applyAdaptive(settings: AdaptiveSettings, allowed: Boolean, pace: Float) {
+        adaptiveSettings = settings
+        adaptiveAllowed = allowed
+        adaptivePace = pace
+        booster.configure(settings, allowed, pace, sampleRateHz)
+    }
+
+    fun applyClarity(settings: ClaritySettings) {
+        clarity = settings.copy(
+            strength = settings.strength.coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH),
+            thresholdDb = settings.thresholdDb.coerceIn(ClaritySettings.MIN_THRESHOLD, ClaritySettings.MAX_THRESHOLD),
+        )
+        effect?.setMbcAllChannelsTo(clarityStage())
+    }
+
+    fun applyLimiter(thresholdDb: Int) {
+        limiterDb = thresholdDb.coerceIn(OutputLevel.MIN_DB, OutputLevel.MAX_DB)
+        effect?.setLimiterAllChannelsTo(limiterStage())
     }
 
     fun updateCurve(curve: EqCurve) {
@@ -377,6 +404,48 @@ class SpeechPipeline(context: Context) {
         toneBands.forEachIndexed { index, band ->
             toneFilters[index].coeffs = band.coefficients(sampleRateHz)
         }
+    }
+
+    private fun clarityStage(): DynamicsProcessing.Mbc {
+        val stage = DynamicsProcessing.Mbc(true, clarity.enabled, ClaritySettings.BAND_COUNT)
+        val cutoffs = clarity.cutoffs(sampleRateHz)
+        val strength = clarity.strength.coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH)
+        val threshold = clarity.thresholdDb.coerceIn(ClaritySettings.MIN_THRESHOLD, ClaritySettings.MAX_THRESHOLD).toFloat()
+        for (index in ClaritySettings.BAND_COUNT - 1 downTo 0) {
+            val weight = ClaritySettings.WEIGHTS[index]
+            val ratio = 1f + weight * strength * 0.25f
+            val preGain = weight * strength
+            stage.setBand(
+                index,
+                DynamicsProcessing.MbcBand(
+                    true,
+                    cutoffs[index],
+                    CLARITY_ATTACK_MS,
+                    CLARITY_RELEASE_MS,
+                    ratio,
+                    if (weight == 0f) 0f else threshold,
+                    CLARITY_KNEE_DB,
+                    CLARITY_GATE_DB,
+                    1f,
+                    preGain,
+                    0f,
+                ),
+            )
+        }
+        return stage
+    }
+
+    private fun limiterStage(): DynamicsProcessing.Limiter {
+        return DynamicsProcessing.Limiter(
+            true,
+            true,
+            0,
+            LIMITER_ATTACK_MS,
+            LIMITER_RELEASE_MS,
+            LIMITER_RATIO,
+            limiterDb.toFloat(),
+            0f,
+        )
     }
 
     private fun graphicEq(): DynamicsProcessing.Eq {
@@ -454,6 +523,9 @@ class SpeechPipeline(context: Context) {
         const val LIMITER_ATTACK_MS = 5f
         const val LIMITER_RELEASE_MS = 60f
         const val LIMITER_RATIO = 20f
-        const val LIMITER_THRESHOLD_DB = -6f
+        const val CLARITY_ATTACK_MS = 10f
+        const val CLARITY_RELEASE_MS = 120f
+        const val CLARITY_KNEE_DB = 8f
+        const val CLARITY_GATE_DB = -90f
     }
 }

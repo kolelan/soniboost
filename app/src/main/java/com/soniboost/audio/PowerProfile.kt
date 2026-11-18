@@ -13,6 +13,14 @@ enum class PowerProfile {
 
 fun PowerProfile.allowsFrequencyLowering(): Boolean = this == PowerProfile.Max
 
+fun PowerProfile.allowsAdaptiveBoost(): Boolean = this != PowerProfile.Saver
+
+fun PowerProfile.adaptivePace(): Float = when (this) {
+    PowerProfile.Max -> 1f
+    PowerProfile.Balanced -> 0.35f
+    PowerProfile.Saver -> 0f
+}
+
 @Suppress("DEPRECATION")
 fun Context.currentPowerProfile(): PowerProfile {
     val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

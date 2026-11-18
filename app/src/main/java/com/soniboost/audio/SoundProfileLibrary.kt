@@ -11,6 +11,10 @@ class SoundProfileLibrary(context: Context) {
 
     fun active(): SoundProfile {
         migrate()
+        val id = preferences.getString(ACTIVE_ID, null)
+        if (!id.isNullOrEmpty()) {
+            SoundProfiles.byId(id)?.let { return it }
+        }
         return decodeProfile(preferences.getString(ACTIVE, null)) ?: SoundProfiles.byId(EqCurves.SPEECH)!!
     }
 
@@ -24,9 +28,19 @@ class SoundProfileLibrary(context: Context) {
         return SoundProfiles.builtins() + users()
     }
 
+    fun originId(): String {
+        migrate()
+        val origin = preferences.getString(ORIGIN, null)
+        if (!origin.isNullOrEmpty()) return origin
+        val active = preferences.getString(ACTIVE_ID, null)
+        if (!active.isNullOrEmpty()) return active
+        return EqCurves.SPEECH
+    }
+
     fun use(profile: SoundProfile) {
         preferences.edit()
             .putString(ACTIVE_ID, profile.id)
+            .putString(ORIGIN, profile.id)
             .putString(ACTIVE, encodeProfile(profile))
             .apply()
     }
@@ -46,7 +60,10 @@ class SoundProfileLibrary(context: Context) {
             current[existing].copy(
                 curve = profile.curve,
                 lowering = profile.lowering,
-                adaptiveEnabled = profile.adaptiveEnabled,
+                adaptive = profile.adaptive,
+                gate = profile.gate,
+                clarity = profile.clarity,
+                limiterDb = profile.limiterDb,
                 description = profile.description,
             )
         } else {
@@ -56,6 +73,7 @@ class SoundProfileLibrary(context: Context) {
         preferences.edit()
             .putString(USERS, encodeUsers(current))
             .putString(ACTIVE_ID, saved.id)
+            .putString(ORIGIN, saved.id)
             .putString(ACTIVE, encodeProfile(saved))
             .apply()
         return saved
@@ -66,7 +84,7 @@ class SoundProfileLibrary(context: Context) {
         val editor = preferences.edit().putString(USERS, encodeUsers(current))
         if (activeId() == id) {
             val flat = SoundProfiles.byId(EqCurves.FLAT)!!
-            editor.putString(ACTIVE_ID, flat.id).putString(ACTIVE, encodeProfile(flat))
+            editor.putString(ACTIVE_ID, flat.id).putString(ORIGIN, flat.id).putString(ACTIVE, encodeProfile(flat))
         }
         editor.apply()
     }
@@ -80,10 +98,10 @@ class SoundProfileLibrary(context: Context) {
         val active = if (builtin != null && curve == builtin.curve) {
             builtin.copy(lowering = if (id == EqCurves.SPEECH || id == EqCurves.STRONG || id == EqCurves.FLAT) lowering else builtin.lowering)
         } else {
-            SoundProfile("", "", curve, lowering, false, false)
+            SoundProfile("", "", curve, lowering, AdaptiveSettings(), false)
         }
         val imported = legacyEq.templates().filterNot { it.builtin }.map { template ->
-            SoundProfile(template.id, template.name, template.curve, LoweringSettings(), false, false)
+            SoundProfile(template.id, template.name, template.curve, LoweringSettings(), AdaptiveSettings(), false)
         }
         preferences.edit()
             .putString(USERS, encodeUsers(imported))
@@ -119,7 +137,10 @@ class SoundProfileLibrary(context: Context) {
             .put("description", profile.description)
             .put("curve", JSONObject(encodeCurve(profile.curve)))
             .put("lowering", encodeLowering(profile.lowering))
-            .put("adaptive", profile.adaptiveEnabled)
+            .put("adaptive", encodeAdaptive(profile.adaptive))
+            .put("gate", encodeGate(profile.gate))
+            .put("clarity", encodeClarity(profile.clarity))
+            .put("limiter", profile.limiterDb)
             .toString()
     }
 
@@ -134,7 +155,11 @@ class SoundProfileLibrary(context: Context) {
                 description = json.optString("description"),
                 curve = decodeCurve(json.getJSONObject("curve")) ?: EqCurves.mild(),
                 lowering = decodeLowering(json.optJSONObject("lowering")),
-                adaptiveEnabled = json.optBoolean("adaptive", false),
+                adaptive = decodeAdaptive(json),
+                gate = decodeGate(json.optJSONObject("gate")),
+                clarity = decodeClarity(json.optJSONObject("clarity")),
+                limiterDb = json.optInt("limiter", OutputLevel.DEFAULT_DB)
+                    .coerceIn(OutputLevel.MIN_DB, OutputLevel.MAX_DB),
                 builtin = SoundProfiles.byId(id) != null,
             )
         } catch (_: Exception) {
@@ -182,6 +207,71 @@ class SoundProfileLibrary(context: Context) {
         return EqCurve(graphic, tones)
     }
 
+    private fun encodeClarity(settings: ClaritySettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("strength", settings.strength)
+            .put("threshold", settings.thresholdDb)
+    }
+
+    private fun decodeClarity(json: JSONObject?): ClaritySettings {
+        if (json == null) return ClaritySettings()
+        return ClaritySettings(
+            enabled = json.optBoolean("enabled", false),
+            strength = json.optInt("strength", ClaritySettings.DEFAULT_STRENGTH)
+                .coerceIn(ClaritySettings.MIN_STRENGTH, ClaritySettings.MAX_STRENGTH),
+            thresholdDb = json.optInt("threshold", ClaritySettings.DEFAULT_THRESHOLD)
+                .coerceIn(ClaritySettings.MIN_THRESHOLD, ClaritySettings.MAX_THRESHOLD),
+        )
+    }
+
+    private fun encodeGate(settings: NoiseGateSettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("threshold", settings.thresholdDb)
+            .put("depth", settings.depthDb)
+            .put("attack", settings.attackMs)
+            .put("hold", settings.holdMs)
+            .put("release", settings.releaseMs)
+    }
+
+    private fun decodeGate(json: JSONObject?): NoiseGateSettings {
+        if (json == null) return NoiseGateSettings()
+        return NoiseGateSettings(
+            enabled = json.optBoolean("enabled", false),
+            thresholdDb = json.optInt("threshold", NoiseGateSettings.DEFAULT_THRESHOLD)
+                .coerceIn(NoiseGateSettings.MIN_THRESHOLD, NoiseGateSettings.MAX_THRESHOLD),
+            depthDb = json.optInt("depth", NoiseGateSettings.DEFAULT_DEPTH)
+                .coerceIn(NoiseGateSettings.MIN_DEPTH, NoiseGateSettings.MAX_DEPTH),
+            attackMs = json.optInt("attack", NoiseGateSettings.DEFAULT_ATTACK)
+                .coerceIn(NoiseGateSettings.MIN_ATTACK, NoiseGateSettings.MAX_ATTACK),
+            holdMs = json.optInt("hold", NoiseGateSettings.DEFAULT_HOLD)
+                .coerceIn(NoiseGateSettings.MIN_HOLD, NoiseGateSettings.MAX_HOLD),
+            releaseMs = json.optInt("release", NoiseGateSettings.DEFAULT_RELEASE)
+                .coerceIn(NoiseGateSettings.MIN_RELEASE, NoiseGateSettings.MAX_RELEASE),
+        )
+    }
+
+    private fun encodeAdaptive(settings: AdaptiveSettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("strength", settings.strengthDb)
+            .put("caution", settings.caution)
+    }
+
+    private fun decodeAdaptive(json: JSONObject): AdaptiveSettings {
+        val raw = json.opt("adaptive")
+        if (raw is Boolean) return AdaptiveSettings(enabled = raw)
+        val objectValue = raw as? JSONObject ?: return AdaptiveSettings()
+        return AdaptiveSettings(
+            enabled = objectValue.optBoolean("enabled", false),
+            strengthDb = objectValue.optInt("strength", AdaptiveSettings.DEFAULT_STRENGTH)
+                .coerceIn(AdaptiveSettings.MIN_STRENGTH, AdaptiveSettings.MAX_STRENGTH),
+            caution = objectValue.optInt("caution", AdaptiveSettings.DEFAULT_CAUTION)
+                .coerceIn(AdaptiveSettings.MIN_CAUTION, AdaptiveSettings.MAX_CAUTION),
+        )
+    }
+
     private fun encodeLowering(settings: LoweringSettings): JSONObject {
         return JSONObject()
             .put("enabled", settings.enabled)
@@ -211,6 +301,7 @@ class SoundProfileLibrary(context: Context) {
         const val FILE = "soniboost"
         const val ACTIVE = "sound_profile"
         const val ACTIVE_ID = "sound_profile_id"
+        const val ORIGIN = "sound_profile_origin"
         const val USERS = "sound_profiles"
     }
 }
