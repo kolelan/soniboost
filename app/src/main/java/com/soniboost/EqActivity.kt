@@ -14,24 +14,33 @@ import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.ImageViewCompat
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
-import com.soniboost.audio.EqLibrary
-import com.soniboost.audio.EqTemplate
+import com.soniboost.audio.LoweringMethod
+import com.soniboost.audio.LoweringSettings
+import com.soniboost.audio.LoweringStore
+import com.soniboost.audio.SoundProfile
+import com.soniboost.audio.SoundProfileLibrary
+import com.soniboost.audio.SoundProfiles
 import com.soniboost.audio.ToneBand
 import com.soniboost.audio.ToneShape
+import com.soniboost.audio.allowsFrequencyLowering
+import com.soniboost.audio.currentPowerProfile
+import java.util.Locale
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 
 class EqActivity : AppCompatActivity() {
-    private lateinit var library: EqLibrary
-    private lateinit var templates: List<EqTemplate>
+    private lateinit var library: SoundProfileLibrary
+    private lateinit var profiles: List<SoundProfile>
     private lateinit var templateSpinner: Spinner
+    private lateinit var profileDescription: TextView
     private lateinit var deleteButton: Button
     private var loading = true
     private var ignoreSpinner = false
@@ -46,26 +55,47 @@ class EqActivity : AppCompatActivity() {
     private val qualityValues = mutableListOf<TextView>()
     private val toneGainSeeks = mutableListOf<SeekBar>()
     private val toneGainValues = mutableListOf<TextView>()
+    private lateinit var loweringSwitch: SwitchCompat
+    private lateinit var powerNote: TextView
+    private lateinit var compressionButton: Button
+    private lateinit var shiftButton: Button
+    private lateinit var cutoffSeek: SeekBar
+    private lateinit var cutoffValue: TextView
+    private lateinit var amountLabel: TextView
+    private lateinit var amountSeek: SeekBar
+    private lateinit var amountValue: TextView
+    private lateinit var mixSeek: SeekBar
+    private lateinit var mixValue: TextView
+    private var loweringMethod = LoweringMethod.Compression
+    private var ratio = 2f
+    private var shiftHz = 1_000
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_eq)
         keepClearOfSystemBars(findViewById(R.id.eqContent))
-        library = EqLibrary(this)
+        library = SoundProfileLibrary(this)
         templateSpinner = findViewById(R.id.templateSpinner)
+        profileDescription = findViewById(R.id.profileDescription)
         deleteButton = findViewById(R.id.deleteTemplateButton)
-        buildGraphicRows(findViewById(R.id.graphicBands))
+        bindLowering()
         buildToneRows(findViewById(R.id.toneBands))
+        buildGraphicRows(findViewById(R.id.graphicBands))
         findViewById<Button>(R.id.saveTemplateButton).setOnClickListener { askNameAndSave() }
         deleteButton.setOnClickListener { deleteSelected() }
-        reloadTemplates(selectId = library.activeTemplateId())
+        reloadProfiles(selectId = library.activeId())
         show(library.active())
         loading = false
     }
 
-    private fun reloadTemplates(selectId: String) {
-        templates = library.templates()
-        val names = templates.map { title(it) }
+    override fun onResume() {
+        super.onResume()
+        if (::powerNote.isInitialized) refreshPowerNote()
+    }
+
+    private fun reloadProfiles(selectId: String) {
+        profiles = library.profiles()
+        val names = profiles.map { title(it) }
         loading = true
         templateSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names).also {
             it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -77,23 +107,24 @@ class EqActivity : AppCompatActivity() {
                     ignoreSpinner = false
                     return
                 }
-                val template = templates[position]
-                library.use(template)
-                show(template.curve)
-                deleteButton.isEnabled = !template.builtin
-                ListeningService.applyEq(this@EqActivity)
+                val profile = profiles[position]
+                library.use(profile)
+                show(profile)
+                deleteButton.isEnabled = !profile.builtin
+                ListeningService.applyProfile(this@EqActivity)
             }
 
             override fun onNothingSelected(parent: AdapterView<*>) = Unit
         }
-        val index = templates.indexOfFirst { it.id == selectId }.coerceAtLeast(0)
+        val index = profiles.indexOfFirst { it.id == selectId }.coerceAtLeast(0)
         templateSpinner.setSelection(index)
-        deleteButton.isEnabled = !templates[index].builtin
+        deleteButton.isEnabled = !profiles[index].builtin
         loading = false
     }
 
-    private fun show(curve: EqCurve) {
+    private fun show(profile: SoundProfile) {
         loading = true
+        val curve = profile.curve
         curve.graphic.forEachIndexed { index, gain ->
             graphicSeeks[index].progress = gain - EqCurve.MIN_DB
             graphicValues[index].text = dbText(gain)
@@ -108,7 +139,10 @@ class EqActivity : AppCompatActivity() {
             toneGainSeeks[index].progress = band.gainDb - EqCurve.MIN_DB
             toneGainValues[index].text = dbText(band.gainDb)
         }
+        showLowering(profile.lowering)
+        showPurpose(profile)
         loading = false
+        refreshPowerNote()
     }
 
     private fun currentCurve(): EqCurve {
@@ -125,40 +159,67 @@ class EqActivity : AppCompatActivity() {
         )
     }
 
+    private fun currentProfile(): SoundProfile {
+        return SoundProfile(
+            id = "",
+            name = "",
+            curve = currentCurve(),
+            lowering = currentLowering(),
+            adaptiveEnabled = false,
+            builtin = false,
+        )
+    }
+
     private fun publish() {
         if (loading) return
-        library.remember(currentCurve())
-        ListeningService.applyEq(this)
+        library.remember(currentProfile())
+        ListeningService.applyProfile(this)
+        refreshPowerNote()
     }
 
     private fun askNameAndSave() {
-        val input = EditText(this).apply {
-            setTextColor(getColor(R.color.on_background))
-            setHintTextColor(getColor(R.color.on_background_muted))
-            hint = getString(R.string.template_name_hint)
-            setSingleLine()
+        val nameInput = field(getString(R.string.template_name_hint))
+        val descriptionInput = field(getString(R.string.template_description_hint))
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(24)
+            setPadding(pad, pad, pad, 0)
+            addView(nameInput)
+            addView(descriptionInput)
         }
         AlertDialog.Builder(this)
             .setTitle(R.string.template_name_title)
-            .setView(input)
+            .setView(form)
             .setPositiveButton(R.string.template_save) { _, _ ->
-                val name = input.text.toString().trim()
+                val name = nameInput.text.toString().trim()
                 if (name.isEmpty()) return@setPositiveButton
-                val saved = library.save(name, currentCurve())
-                reloadTemplates(saved.id)
-                ListeningService.applyEq(this)
+                val saved = library.save(
+                    name,
+                    currentProfile().copy(description = descriptionInput.text.toString().trim()),
+                )
+                reloadProfiles(saved.id)
+                ListeningService.applyProfile(this)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
+    private fun field(hint: String): EditText {
+        return EditText(this).apply {
+            setTextColor(getColor(R.color.on_background))
+            setHintTextColor(getColor(R.color.on_background_muted))
+            this.hint = hint
+            setSingleLine()
+        }
+    }
+
     private fun deleteSelected() {
-        val template = templates.getOrNull(templateSpinner.selectedItemPosition) ?: return
-        if (template.builtin) return
-        library.delete(template.id)
-        reloadTemplates(EqCurves.FLAT)
+        val profile = profiles.getOrNull(templateSpinner.selectedItemPosition) ?: return
+        if (profile.builtin) return
+        library.delete(profile.id)
+        reloadProfiles(EqCurves.FLAT)
         show(library.active())
-        ListeningService.applyEq(this)
+        ListeningService.applyProfile(this)
     }
 
     private fun buildGraphicRows(parent: LinearLayout) {
@@ -276,13 +337,46 @@ class EqActivity : AppCompatActivity() {
         }
     }
 
-    private fun title(template: EqTemplate): String {
-        return when (template.id) {
+    private fun title(profile: SoundProfile): String {
+        return when (profile.id) {
             EqCurves.SPEECH -> getString(R.string.template_speech)
             EqCurves.STRONG -> getString(R.string.template_strong)
+            SoundProfiles.CLARITY -> getString(R.string.template_clarity)
+            SoundProfiles.EVERYDAY -> getString(R.string.template_everyday)
+            SoundProfiles.NOISE -> getString(R.string.template_noise)
+            SoundProfiles.QUIET -> getString(R.string.template_quiet)
+            SoundProfiles.MUSIC -> getString(R.string.template_music)
+            SoundProfiles.TV -> getString(R.string.template_tv)
+            SoundProfiles.PHONE -> getString(R.string.template_phone)
+            SoundProfiles.OUTDOOR -> getString(R.string.template_outdoor)
+            SoundProfiles.CAR -> getString(R.string.template_car)
+            SoundProfiles.FL_MODERATE -> getString(R.string.template_fl_moderate)
+            SoundProfiles.FL_STRONG -> getString(R.string.template_fl_strong)
             EqCurves.FLAT -> getString(R.string.template_flat)
-            else -> template.name
+            else -> profile.name
         }
+    }
+
+    private fun showPurpose(profile: SoundProfile) {
+        val text = when (profile.id) {
+            EqCurves.SPEECH -> getString(R.string.profile_speech_purpose)
+            EqCurves.STRONG -> getString(R.string.profile_strong_purpose)
+            SoundProfiles.CLARITY -> getString(R.string.profile_clarity_purpose)
+            SoundProfiles.EVERYDAY -> getString(R.string.profile_everyday_purpose)
+            SoundProfiles.NOISE -> getString(R.string.profile_noise_purpose)
+            SoundProfiles.QUIET -> getString(R.string.profile_quiet_purpose)
+            SoundProfiles.MUSIC -> getString(R.string.profile_music_purpose)
+            SoundProfiles.TV -> getString(R.string.profile_tv_purpose)
+            SoundProfiles.PHONE -> getString(R.string.profile_phone_purpose)
+            SoundProfiles.OUTDOOR -> getString(R.string.profile_outdoor_purpose)
+            SoundProfiles.CAR -> getString(R.string.profile_car_purpose)
+            SoundProfiles.FL_MODERATE -> getString(R.string.profile_fl_moderate_purpose)
+            SoundProfiles.FL_STRONG -> getString(R.string.profile_fl_strong_purpose)
+            EqCurves.FLAT -> getString(R.string.profile_flat_purpose)
+            else -> profile.description
+        }
+        profileDescription.text = text
+        profileDescription.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
     }
 
     private fun row(label: TextView, seek: SeekBar, value: TextView): LinearLayout {
@@ -374,6 +468,117 @@ class EqActivity : AppCompatActivity() {
         }
     }
 
+    private fun bindLowering() {
+        loweringSwitch = findViewById(R.id.loweringSwitch)
+        powerNote = findViewById(R.id.powerNote)
+        compressionButton = findViewById(R.id.compressionButton)
+        shiftButton = findViewById(R.id.shiftButton)
+        cutoffSeek = findViewById(R.id.cutoffSeek)
+        cutoffValue = findViewById(R.id.cutoffValue)
+        amountLabel = findViewById(R.id.amountLabel)
+        amountSeek = findViewById(R.id.amountSeek)
+        amountValue = findViewById(R.id.amountValue)
+        mixSeek = findViewById(R.id.mixSeek)
+        mixValue = findViewById(R.id.mixValue)
+        cutoffSeek.setOnSeekBarChangeListener(loweringListener { showCutoff(); publish() })
+        amountSeek.setOnSeekBarChangeListener(loweringListener { showAmount(); publish() })
+        mixSeek.setOnSeekBarChangeListener(loweringListener { showMix(); publish() })
+        loweringSwitch.setOnCheckedChangeListener { _, _ -> if (!loading) publish() }
+        compressionButton.setOnClickListener { selectLowering(LoweringMethod.Compression) }
+        shiftButton.setOnClickListener { selectLowering(LoweringMethod.Transposition) }
+    }
+
+    private fun selectLowering(method: LoweringMethod) {
+        loweringMethod = method
+        markLowering()
+        showAmount()
+        publish()
+    }
+
+    private fun showLowering(settings: LoweringSettings) {
+        loweringMethod = settings.method
+        ratio = settings.ratio
+        shiftHz = settings.shiftHz
+        loweringSwitch.isChecked = settings.enabled
+        cutoffSeek.progress = ((settings.cutoffHz - LoweringStore.MIN_CUTOFF) / CUTOFF_STEP)
+            .coerceIn(0, cutoffSeek.max)
+        amountSeek.max = if (settings.method == LoweringMethod.Compression) RATIO_STEPS else SHIFT_STEPS
+        amountSeek.progress = if (settings.method == LoweringMethod.Compression) {
+            ((ratio - LoweringStore.MIN_RATIO) / RATIO_STEP).toInt()
+        } else {
+            (shiftHz - LoweringStore.MIN_SHIFT) / SHIFT_STEP
+        }.coerceIn(0, amountSeek.max)
+        mixSeek.progress = (settings.mix * 100f).toInt().coerceIn(0, 100)
+        markLowering()
+        showCutoff()
+        showAmount()
+        showMix()
+    }
+
+    private fun currentLowering(): LoweringSettings {
+        if (loweringMethod == LoweringMethod.Compression) {
+            ratio = LoweringStore.MIN_RATIO + amountSeek.progress * RATIO_STEP
+        } else {
+            shiftHz = LoweringStore.MIN_SHIFT + amountSeek.progress * SHIFT_STEP
+        }
+        return LoweringSettings(
+            enabled = loweringSwitch.isChecked,
+            method = loweringMethod,
+            cutoffHz = LoweringStore.MIN_CUTOFF + cutoffSeek.progress * CUTOFF_STEP,
+            ratio = ratio,
+            shiftHz = shiftHz,
+            mix = mixSeek.progress / 100f,
+        )
+    }
+
+    private fun markLowering() {
+        compressionButton.isSelected = loweringMethod == LoweringMethod.Compression
+        shiftButton.isSelected = loweringMethod == LoweringMethod.Transposition
+    }
+
+    private fun showCutoff() {
+        cutoffValue.text = getString(R.string.lowering_hz, LoweringStore.MIN_CUTOFF + cutoffSeek.progress * CUTOFF_STEP)
+    }
+
+    private fun showAmount() {
+        if (loweringMethod == LoweringMethod.Compression) {
+            if (amountSeek.max != RATIO_STEPS) {
+                amountSeek.max = RATIO_STEPS
+                amountSeek.progress = ((ratio - LoweringStore.MIN_RATIO) / RATIO_STEP).toInt().coerceIn(0, RATIO_STEPS)
+            }
+            amountLabel.text = getString(R.string.lowering_ratio)
+            amountValue.text = String.format(Locale.getDefault(), "%.1f", LoweringStore.MIN_RATIO + amountSeek.progress * RATIO_STEP)
+        } else {
+            if (amountSeek.max != SHIFT_STEPS) {
+                amountSeek.max = SHIFT_STEPS
+                amountSeek.progress = ((shiftHz - LoweringStore.MIN_SHIFT) / SHIFT_STEP).coerceIn(0, SHIFT_STEPS)
+            }
+            amountLabel.text = getString(R.string.lowering_shift_amount)
+            amountValue.text = getString(R.string.lowering_hz, LoweringStore.MIN_SHIFT + amountSeek.progress * SHIFT_STEP)
+        }
+    }
+
+    private fun showMix() {
+        mixValue.text = getString(R.string.lowering_mix_value, mixSeek.progress)
+    }
+
+    private fun refreshPowerNote() {
+        val blocked = loweringSwitch.isChecked && !currentPowerProfile().allowsFrequencyLowering()
+        powerNote.visibility = if (blocked) View.VISIBLE else View.GONE
+    }
+
+    private fun loweringListener(onChange: () -> Unit): SeekBar.OnSeekBarChangeListener {
+        return object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser && !loading) onChange()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+        }
+    }
+
     private fun keepClearOfSystemBars(content: View) {
         val baseLeft = content.paddingLeft
         val baseTop = content.paddingTop
@@ -398,5 +603,10 @@ class EqActivity : AppCompatActivity() {
         const val QUALITY_STEPS = 75
         const val MIN_HZ = 100.0
         const val MAX_HZ = 8_000.0
+        const val CUTOFF_STEP = 100
+        const val RATIO_STEP = 0.1f
+        const val RATIO_STEPS = 15
+        const val SHIFT_STEP = 50
+        const val SHIFT_STEPS = 40
     }
 }
