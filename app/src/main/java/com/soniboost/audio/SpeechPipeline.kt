@@ -28,7 +28,7 @@ sealed interface StartResult {
 }
 
 /**
- * Микрофон → подъём 1–4 кГц → лимитер → наушники.
+ * Микрофон → точные полосы → перенос высоких частот → графический эквалайзер → лимитер → наушники.
  * Лимитер системный и вешается на сессию [AudioTrack]: эксклюзивный Oboe часто обходит этот путь.
  */
 class SpeechPipeline(context: Context) {
@@ -55,6 +55,9 @@ class SpeechPipeline(context: Context) {
     private var graphicGains = EqCurves.mild().graphic
     private var toneBands = EqCurves.mild().tones
     private val toneFilters = Array(EqCurve.TONE_COUNT) { Biquad() }
+    private val lowerer = FrequencyLowerer()
+    private var loweringSettings = LoweringSettings()
+    private var loweringAllowed = true
     private var focusRequest: AudioFocusRequest? = null
 
     var microphone: MicrophoneChoice = MicrophoneChoice.Phone
@@ -229,6 +232,7 @@ class SpeechPipeline(context: Context) {
             if (read < 0) break
             if (read == 0) continue
             shape(buffer, read)
+            lowerer.process(buffer, read)
             val written = player.write(buffer, 0, read, AudioTrack.WRITE_BLOCKING)
             if (written < 0) break
         }
@@ -267,6 +271,7 @@ class SpeechPipeline(context: Context) {
         prepared.playbackDevice?.let { player.setPreferredDevice(it) }
         outputBufferMs = player.bufferSizeInFrames * 1_000 / sampleRate
         sampleRateHz = sampleRate
+        lowerer.configure(loweringSettings, loweringAllowed, sampleRate)
         pushTones()
         effect = speechEffect(player.audioSessionId)
         record = openMicrophone(prepared, sampleRate, encoding, channelIn, recordBytes)
@@ -343,6 +348,12 @@ class SpeechPipeline(context: Context) {
         )
         processing.enabled = true
         return processing
+    }
+
+    fun applyLowering(settings: LoweringSettings, allowed: Boolean) {
+        loweringSettings = settings
+        loweringAllowed = allowed
+        lowerer.configure(settings, allowed, sampleRateHz)
     }
 
     fun updateCurve(curve: EqCurve) {

@@ -1,0 +1,216 @@
+package com.soniboost.audio
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+class SoundProfileLibrary(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private val legacyEq = EqLibrary(context)
+    private val legacyLowering = LoweringStore(context)
+
+    fun active(): SoundProfile {
+        migrate()
+        return decodeProfile(preferences.getString(ACTIVE, null)) ?: SoundProfiles.byId(EqCurves.SPEECH)!!
+    }
+
+    fun activeId(): String {
+        migrate()
+        return preferences.getString(ACTIVE_ID, EqCurves.SPEECH) ?: EqCurves.SPEECH
+    }
+
+    fun profiles(): List<SoundProfile> {
+        migrate()
+        return SoundProfiles.builtins() + users()
+    }
+
+    fun use(profile: SoundProfile) {
+        preferences.edit()
+            .putString(ACTIVE_ID, profile.id)
+            .putString(ACTIVE, encodeProfile(profile))
+            .apply()
+    }
+
+    fun remember(profile: SoundProfile) {
+        preferences.edit()
+            .putString(ACTIVE_ID, "")
+            .putString(ACTIVE, encodeProfile(profile.copy(id = "", name = "", builtin = false)))
+            .apply()
+    }
+
+    fun save(name: String, profile: SoundProfile): SoundProfile {
+        val trimmed = name.trim()
+        val current = users().toMutableList()
+        val existing = current.indexOfFirst { it.name == trimmed }
+        val saved = if (existing >= 0) {
+            current[existing].copy(
+                curve = profile.curve,
+                lowering = profile.lowering,
+                adaptiveEnabled = profile.adaptiveEnabled,
+                description = profile.description,
+            )
+        } else {
+            profile.copy(id = "user-${System.currentTimeMillis()}", name = trimmed, builtin = false)
+        }
+        if (existing >= 0) current[existing] = saved else current.add(saved)
+        preferences.edit()
+            .putString(USERS, encodeUsers(current))
+            .putString(ACTIVE_ID, saved.id)
+            .putString(ACTIVE, encodeProfile(saved))
+            .apply()
+        return saved
+    }
+
+    fun delete(id: String) {
+        val current = users().filterNot { it.id == id }
+        val editor = preferences.edit().putString(USERS, encodeUsers(current))
+        if (activeId() == id) {
+            val flat = SoundProfiles.byId(EqCurves.FLAT)!!
+            editor.putString(ACTIVE_ID, flat.id).putString(ACTIVE, encodeProfile(flat))
+        }
+        editor.apply()
+    }
+
+    private fun migrate() {
+        if (preferences.contains(ACTIVE)) return
+        val lowering = legacyLowering.get()
+        val id = legacyEq.activeTemplateId()
+        val curve = legacyEq.active()
+        val builtin = SoundProfiles.byId(id)
+        val active = if (builtin != null && curve == builtin.curve) {
+            builtin.copy(lowering = if (id == EqCurves.SPEECH || id == EqCurves.STRONG || id == EqCurves.FLAT) lowering else builtin.lowering)
+        } else {
+            SoundProfile("", "", curve, lowering, false, false)
+        }
+        val imported = legacyEq.templates().filterNot { it.builtin }.map { template ->
+            SoundProfile(template.id, template.name, template.curve, LoweringSettings(), false, false)
+        }
+        preferences.edit()
+            .putString(USERS, encodeUsers(imported))
+            .putString(ACTIVE_ID, active.id)
+            .putString(ACTIVE, encodeProfile(active))
+            .apply()
+    }
+
+    private fun users(): List<SoundProfile> {
+        val raw = preferences.getString(USERS, null) ?: return emptyList()
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    decodeProfile(array.getJSONObject(index).toString())?.let { add(it.copy(builtin = false)) }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun encodeUsers(profiles: List<SoundProfile>): String {
+        val array = JSONArray()
+        profiles.forEach { array.put(JSONObject(encodeProfile(it))) }
+        return array.toString()
+    }
+
+    private fun encodeProfile(profile: SoundProfile): String {
+        return JSONObject()
+            .put("id", profile.id)
+            .put("name", profile.name)
+            .put("description", profile.description)
+            .put("curve", JSONObject(encodeCurve(profile.curve)))
+            .put("lowering", encodeLowering(profile.lowering))
+            .put("adaptive", profile.adaptiveEnabled)
+            .toString()
+    }
+
+    private fun decodeProfile(raw: String?): SoundProfile? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            val json = JSONObject(raw)
+            val id = json.optString("id")
+            SoundProfile(
+                id = id,
+                name = json.optString("name"),
+                description = json.optString("description"),
+                curve = decodeCurve(json.getJSONObject("curve")) ?: EqCurves.mild(),
+                lowering = decodeLowering(json.optJSONObject("lowering")),
+                adaptiveEnabled = json.optBoolean("adaptive", false),
+                builtin = SoundProfiles.byId(id) != null,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun encodeCurve(curve: EqCurve): String {
+        val tones = JSONArray()
+        curve.tones.forEach { band ->
+            tones.put(
+                JSONObject()
+                    .put("shape", band.shape.name)
+                    .put("hz", band.frequencyHz)
+                    .put("q", band.q.toDouble())
+                    .put("db", band.gainDb),
+            )
+        }
+        return JSONObject()
+            .put("graphic", JSONArray(curve.graphic))
+            .put("tones", tones)
+            .toString()
+    }
+
+    private fun decodeCurve(json: JSONObject?): EqCurve? {
+        if (json == null) return null
+        val graphicJson = json.getJSONArray("graphic")
+        val graphic = List(EqCurve.BAND_COUNT) { index ->
+            if (index < graphicJson.length()) graphicJson.getInt(index).coerceIn(EqCurve.MIN_DB, EqCurve.MAX_DB) else 0
+        }
+        val tonesJson = json.optJSONArray("tones")
+        val tones = List(EqCurve.TONE_COUNT) { index ->
+            if (tonesJson == null || index >= tonesJson.length()) {
+                ToneBand()
+            } else {
+                val band = tonesJson.getJSONObject(index)
+                ToneBand(
+                    shape = runCatching { ToneShape.valueOf(band.getString("shape")) }.getOrDefault(ToneShape.Peak),
+                    frequencyHz = band.optInt("hz", 1_000).coerceIn(100, 8_000),
+                    q = band.optDouble("q", 1.0).toFloat().coerceIn(0.5f, 8f),
+                    gainDb = band.optInt("db", 0).coerceIn(EqCurve.MIN_DB, EqCurve.MAX_DB),
+                )
+            }
+        }
+        return EqCurve(graphic, tones)
+    }
+
+    private fun encodeLowering(settings: LoweringSettings): JSONObject {
+        return JSONObject()
+            .put("enabled", settings.enabled)
+            .put("method", settings.method.name)
+            .put("cutoff", settings.cutoffHz)
+            .put("ratio", settings.ratio.toDouble())
+            .put("shift", settings.shiftHz)
+            .put("mix", settings.mix.toDouble())
+    }
+
+    private fun decodeLowering(json: JSONObject?): LoweringSettings {
+        if (json == null) return LoweringSettings()
+        val method = runCatching {
+            LoweringMethod.valueOf(json.optString("method", LoweringMethod.Compression.name))
+        }.getOrDefault(LoweringMethod.Compression)
+        return LoweringSettings(
+            enabled = json.optBoolean("enabled", false),
+            method = method,
+            cutoffHz = json.optInt("cutoff", 2_500).coerceIn(LoweringStore.MIN_CUTOFF, LoweringStore.MAX_CUTOFF),
+            ratio = json.optDouble("ratio", 2.0).toFloat().coerceIn(LoweringStore.MIN_RATIO, LoweringStore.MAX_RATIO),
+            shiftHz = json.optInt("shift", 1_000).coerceIn(LoweringStore.MIN_SHIFT, LoweringStore.MAX_SHIFT),
+            mix = json.optDouble("mix", 1.0).toFloat().coerceIn(0f, 1f),
+        )
+    }
+
+    private companion object {
+        const val FILE = "soniboost"
+        const val ACTIVE = "sound_profile"
+        const val ACTIVE_ID = "sound_profile_id"
+        const val USERS = "sound_profiles"
+    }
+}

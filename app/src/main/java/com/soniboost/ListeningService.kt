@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -19,10 +21,14 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import com.soniboost.audio.EqLibrary
 import com.soniboost.audio.HeadphoneRoute
+import com.soniboost.audio.SoundProfileLibrary
 import com.soniboost.audio.MicrophoneChoice
 import com.soniboost.audio.MicrophoneChoiceStore
+import com.soniboost.audio.PowerProfile
+import com.soniboost.audio.allowsFrequencyLowering
+import com.soniboost.audio.currentPowerProfile
+import com.soniboost.audio.powerProfileOf
 import com.soniboost.audio.PipelineFailure
 import com.soniboost.audio.SpeechPipeline
 import com.soniboost.audio.StartResult
@@ -38,7 +44,9 @@ class ListeningService : Service() {
     private lateinit var pipeline: SpeechPipeline
     private lateinit var audioManager: AudioManager
     private lateinit var microphoneStore: MicrophoneChoiceStore
-    private lateinit var eqLibrary: EqLibrary
+    private lateinit var profiles: SoundProfileLibrary
+    private var powerProfile = PowerProfile.Max
+    private var batteryWatching = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioJobs = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "soniboost-route")
@@ -57,15 +65,30 @@ class ListeningService : Service() {
         pipeline = SpeechPipeline(this)
         audioManager = getSystemService(AudioManager::class.java)
         microphoneStore = MicrophoneChoiceStore(this)
-        eqLibrary = EqLibrary(this)
+        profiles = SoundProfileLibrary(this)
+        powerProfile = currentPowerProfile()
+        registerBatteryWatch()
         ensureChannel()
+    }
+
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val next = powerProfileOf(intent)
+            if (next == powerProfile) return
+            powerProfile = next
+            audioJobs.execute {
+                pipeline.applyLowering(profiles.active().lowering, next.allowsFrequencyLowering())
+            }
+            if (engaged) updateNotification()
+            publish()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopProcessing()
             ACTION_SET_MIC -> switchMicrophone(intent)
-            ACTION_APPLY_EQ -> applyStoredEq()
+            ACTION_APPLY_EQ, ACTION_APPLY_LOWERING -> applyStoredProfile()
             else -> startProcessing()
         }
         return START_NOT_STICKY
@@ -78,6 +101,7 @@ class ListeningService : Service() {
         if (pipeline.isRunning()) pipeline.stop()
         audioJobs.shutdownNow()
         unregisterRouteWatch()
+        unregisterBatteryWatch()
         releaseWakeLock()
         running = false
         publish()
@@ -97,16 +121,37 @@ class ListeningService : Service() {
         engaged = true
         audioJobs.execute {
             pipeline.onStopped = { mainHandler.post { stopProcessing() } }
-            pipeline.updateCurve(eqLibrary.active())
+            val profile = profiles.active()
+            pipeline.updateCurve(profile.curve)
+            pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
             val result = pipeline.start(microphoneStore.get())
             mainHandler.post { if (!stopping) applyResult(result) }
         }
     }
 
-    private fun applyStoredEq() {
+    private fun applyStoredProfile() {
         audioJobs.execute {
-            pipeline.updateCurve(eqLibrary.active())
+            val profile = profiles.active()
+            pipeline.updateCurve(profile.curve)
+            pipeline.applyLowering(profile.lowering, powerProfile.allowsFrequencyLowering())
         }
+    }
+
+    private fun registerBatteryWatch() {
+        if (batteryWatching) return
+        ContextCompat.registerReceiver(
+            this,
+            batteryReceiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        batteryWatching = true
+    }
+
+    private fun unregisterBatteryWatch() {
+        if (!batteryWatching) return
+        unregisterReceiver(batteryReceiver)
+        batteryWatching = false
     }
 
     private fun switchMicrophone(intent: Intent) {
@@ -287,7 +332,11 @@ class ListeningService : Service() {
             ""
         }
         val listening = getString(R.string.notification_listening)
-        return if (mic.isEmpty()) listening else "$listening $mic"
+        val base = if (mic.isEmpty()) listening else "$listening $mic"
+        val paused = ::profiles.isInitialized &&
+            profiles.active().lowering.enabled &&
+            !powerProfile.allowsFrequencyLowering()
+        return if (paused) "$base ${getString(R.string.notification_lowering_paused)}" else base
     }
 
     private fun failureText(result: StartResult.Rejected): String {
@@ -306,6 +355,7 @@ class ListeningService : Service() {
         private const val ACTION_STOP = "com.soniboost.action.STOP"
         private const val ACTION_SET_MIC = "com.soniboost.action.SET_MIC"
         private const val ACTION_APPLY_EQ = "com.soniboost.action.APPLY_EQ"
+        private const val ACTION_APPLY_LOWERING = "com.soniboost.action.APPLY_LOWERING"
         private const val EXTRA_MIC = "microphone"
 
         @Volatile
@@ -335,11 +385,15 @@ class ListeningService : Service() {
             context.startService(intent)
         }
 
-        fun applyEq(context: Context) {
+        fun applyProfile(context: Context) {
             if (!engaged) return
             val intent = Intent(context, ListeningService::class.java).setAction(ACTION_APPLY_EQ)
             context.startService(intent)
         }
+
+        fun applyEq(context: Context) = applyProfile(context)
+
+        fun applyLowering(context: Context) = applyProfile(context)
 
         fun setMicrophone(context: Context, choice: MicrophoneChoice) {
             MicrophoneChoiceStore(context).set(choice)
