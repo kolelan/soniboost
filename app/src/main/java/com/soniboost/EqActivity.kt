@@ -12,6 +12,8 @@ import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.soniboost.audio.EqCurve
 import com.soniboost.audio.EqCurves
 import com.soniboost.audio.EqLibrary
@@ -34,6 +36,7 @@ class EqActivity : AppCompatActivity() {
     private val graphicValues = mutableListOf<TextView>()
     private val toneShapes = MutableList(EqCurve.TONE_COUNT) { ToneShape.Peak }
     private val toneShapeButtons = mutableListOf<List<Button>>()
+    private val toneShapeHints = mutableListOf<TextView>()
     private val frequencySeeks = mutableListOf<SeekBar>()
     private val frequencyValues = mutableListOf<TextView>()
     private val qualitySeeks = mutableListOf<SeekBar>()
@@ -44,6 +47,7 @@ class EqActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_eq)
+        keepClearOfSystemBars(findViewById(R.id.eqContent))
         library = EqLibrary(this)
         templateSpinner = findViewById(R.id.templateSpinner)
         deleteButton = findViewById(R.id.deleteTemplateButton)
@@ -195,6 +199,13 @@ class EqActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 buttons.forEach { addView(it) }
             })
+            val hint = TextView(this).apply {
+                setTextColor(getColor(R.color.on_background_muted))
+                textSize = 16f
+                setPadding(0, dp(4), 0, 0)
+            }
+            toneShapeHints += hint
+            parent.addView(hint)
             val frequencyValue = valueText()
             val frequency = SeekBar(this).apply {
                 max = FREQUENCY_STEPS
@@ -232,6 +243,7 @@ class EqActivity : AppCompatActivity() {
         toneShapeButtons[index].forEachIndexed { shapeIndex, button ->
             button.isSelected = ToneShape.entries[shapeIndex] == toneShapes[index]
         }
+        toneShapeHints[index].text = shapeHint(toneShapes[index])
     }
 
     private fun title(template: EqTemplate): String {
@@ -259,7 +271,7 @@ class EqActivity : AppCompatActivity() {
             this.text = text
             setTextColor(getColor(R.color.on_background))
             textSize = 16f
-            width = dp(72)
+            width = dp(112)
         }
     }
 
@@ -319,6 +331,31 @@ class EqActivity : AppCompatActivity() {
             ToneShape.Peak -> getString(R.string.tone_peak)
             ToneShape.LowShelf -> getString(R.string.tone_low)
             ToneShape.HighShelf -> getString(R.string.tone_high)
+        }
+    }
+
+    private fun shapeHint(shape: ToneShape): String {
+        return when (shape) {
+            ToneShape.Peak -> getString(R.string.tone_peak_hint)
+            ToneShape.LowShelf -> getString(R.string.tone_low_hint)
+            ToneShape.HighShelf -> getString(R.string.tone_high_hint)
+        }
+    }
+
+    private fun keepClearOfSystemBars(content: View) {
+        val baseLeft = content.paddingLeft
+        val baseTop = content.paddingTop
+        val baseRight = content.paddingRight
+        val baseBottom = content.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                baseLeft + bars.left,
+                baseTop + bars.top,
+                baseRight + bars.right,
+                baseBottom + bars.bottom,
+            )
+            insets
         }
     }
 
